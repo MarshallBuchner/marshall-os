@@ -24,7 +24,39 @@ import { DEMO_PENDING_APPROVALS } from "@/lib/demo/fixtures";
 import { getProject, listProjects } from "@/lib/registry/projects";
 import { DEMO_SCHEDULE } from "@/lib/demo/fixtures";
 
-let commands: JarvisCommand[] = [];
+/** Seed command aligned with DEMO_PENDING_APPROVALS — simulated only */
+const DEMO_COMMAND: JarvisCommand = {
+  id: "cmd-demo-1",
+  input: "Have Cursor investigate QuantLab's mobile dashboard.",
+  createdAt: "2026-09-29T23:10:00Z",
+  intent: {
+    type: "CODE_TASK",
+    confidence: 0.9,
+    targetProjectId: "quantlab",
+    targetAgentId: "cursor",
+    summary: "code task → quantlab via cursor",
+    rawInput: "Have Cursor investigate QuantLab's mobile dashboard.",
+  },
+  proposedAction: {
+    id: "act-demo-1",
+    label: "Investigate QuantLab mobile dashboard",
+    description:
+      "Have Cursor Agent inspect QuantLab mobile dashboard issues and return findings.",
+    effect:
+      "Simulated handoff only — no repo writes, no external API calls in V0.",
+    permissionLevel: "L3_IMPORTANT",
+    reversible: false,
+  },
+  routedAgentId: "cursor",
+  routedProjectId: "quantlab",
+  permissionLevel: "L3_IMPORTANT",
+  requiresApproval: true,
+  status: "WAITING_APPROVAL",
+  result: null,
+  approvalId: "apr-demo-1",
+};
+
+let commands: JarvisCommand[] = [DEMO_COMMAND];
 let approvals: ApprovalRequest[] = [...DEMO_PENDING_APPROVALS];
 
 function uid(prefix: string): string {

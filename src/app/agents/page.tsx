@@ -1,4 +1,4 @@
-import { listAgents } from "@/lib/registry/projects";
+import { listAgents, agentConnectionLabel } from "@/lib/registry/projects";
 import { PERMISSION_LABELS } from "@/lib/jarvis/permissions";
 import { formatTime } from "@/lib/utils";
 
@@ -8,9 +8,10 @@ export default function AgentsPage() {
   return (
     <div className="space-y-5">
       <header>
-        <h1 className="display-font text-xl text-[var(--electric)]">AI AGENTS</h1>
+        <h1 className="display-font text-xl text-[var(--electric)]">AGENT NETWORK</h1>
         <p className="mt-1 text-sm text-[var(--text-muted)]">
-          Agent registry — roles, capabilities, permission levels. Not connected to live provider APIs in V0.
+          Nodes around Jarvis — roles, capabilities, permissions. Connection is honest: never
+          ONLINE unless a real adapter link exists.
         </p>
       </header>
 
@@ -24,14 +25,8 @@ export default function AgentsPage() {
                   {a.provider} · {a.role}
                 </p>
               </div>
-              <span
-                className={`mono text-[10px] uppercase ${
-                  a.status === "ready"
-                    ? "text-[var(--health)]"
-                    : "text-[var(--warn)]"
-                }`}
-              >
-                {a.status.replace("_", " ")}
+              <span className="mono text-[10px] uppercase text-[var(--warn)]">
+                {agentConnectionLabel(a)}
               </span>
             </div>
 
@@ -70,7 +65,7 @@ export default function AgentsPage() {
                 RECENT TASKS
               </h3>
               {a.recentTasks.length === 0 ? (
-                <p className="mt-2 text-xs text-[var(--text-muted)]">None recorded.</p>
+                <p className="mt-2 text-xs text-[var(--text-muted)]">None — not connected.</p>
               ) : (
                 <ul className="mt-2 space-y-1 text-xs text-[var(--text-muted)]">
                   {a.recentTasks.map((t) => (

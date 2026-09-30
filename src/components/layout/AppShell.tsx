@@ -1,24 +1,29 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { TopNav } from "@/components/layout/TopNav";
 import { JarvisProvider } from "@/components/jarvis/JarvisProvider";
-import { JarvisPanel } from "@/components/jarvis/JarvisPanel";
 import { ApprovalCenter } from "@/components/jarvis/ApprovalCenter";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isOverview = pathname === "/";
+
   return (
     <JarvisProvider>
       <div className="mos-shell flex min-h-screen flex-col">
         <TopNav />
-        <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-5 md:px-6 md:py-6">
+        <main className="mx-auto w-full max-w-[1600px] flex-1 px-3 py-4 md:px-6 md:py-5">
           {children}
         </main>
-        <JarvisPanel />
-        <div className="mx-auto w-full max-w-[1600px] px-4 pb-8 md:px-6">
-          <ApprovalCenter />
-        </div>
+        {!isOverview && (
+          <div className="mx-auto w-full max-w-[1600px] px-3 pb-8 md:px-6">
+            <ApprovalCenter />
+          </div>
+        )}
         <footer className="border-t border-[var(--border)] px-4 py-3 text-center mono text-[10px] text-[var(--text-muted)]">
-          MARSHALL OS V0 · DEMO_MODE · JARVIS orchestration (simulated) · No live trading · No L4 execution
+          MARSHALL OS V0.2 · DEMO_MODE · JARVIS operating layer (simulated) · No live trading · No
+          L4 execution · Adapters not configured
         </footer>
       </div>
     </JarvisProvider>

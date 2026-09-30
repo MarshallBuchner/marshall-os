@@ -22,9 +22,9 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Marshall OS — AI Command Center",
+  title: "Marshall OS — Personal AI Operating Environment",
   description:
-    "Personal AI command center and orchestration layer. Internal assistant: JARVIS.",
+    "JARVIS-centered personal AI operating environment and orchestration layer.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

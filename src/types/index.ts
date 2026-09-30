@@ -181,6 +181,20 @@ export interface KnowledgeNode {
   source: "DEMO_FIXTURE";
 }
 
+export interface AttentionItem {
+  id: string;
+  severity: "low" | "medium" | "high" | "critical";
+  systemId: string;
+  systemName: string;
+  reason: string;
+  recommendedAction: string;
+  /** Whether Jarvis can handle via simulated/read path in V0 */
+  jarvisCanHandle: boolean;
+  handleNote: string;
+  source: "DEMO_FIXTURE";
+  timestamp: string;
+}
+
 export interface IntegrationAdapterMeta {
   id: string;
   name: string;

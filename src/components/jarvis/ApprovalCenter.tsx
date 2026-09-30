@@ -13,9 +13,9 @@ export function ApprovalCenter() {
     <section className="glass mt-6 p-4 md:p-5" id="approval-center">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="display-font text-sm text-[var(--electric)]">APPROVAL CENTER</h2>
+          <h2 className="display-font text-[11px] text-[var(--electric)]">APPROVAL CENTER</h2>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Simulated state machine only — approve marks planned work complete without live execution.
+            Simulated state machine only — Approve/Cancel never claims live execution.
           </p>
         </div>
         <span className="badge-demo">DEMO / SIMULATED</span>

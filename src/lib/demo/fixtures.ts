@@ -8,6 +8,7 @@ import type {
   ActivityEvent,
   Agent,
   ApprovalRequest,
+  AttentionItem,
   AutomationDefinition,
   KnowledgeNode,
   Project,
@@ -341,6 +342,45 @@ export const DEMO_KNOWLEDGE: KnowledgeNode[] = [
     tags: ["jarvis", "permissions"],
     updatedAt: "2026-09-30T00:00:00Z",
     source: DEMO_SOURCE,
+  },
+];
+
+export const DEMO_ATTENTION: AttentionItem[] = [
+  {
+    id: "attn-1",
+    severity: "high",
+    systemId: "northstar",
+    systemName: "Northstar",
+    reason: "Job queue lag — shop OS marked degraded in demo health scan.",
+    recommendedAction: "Ask Jarvis for a Northstar status brief, then queue a Cursor investigation if needed.",
+    jarvisCanHandle: true,
+    handleNote: "Jarvis can compile a simulated attention brief (L1). Code investigation needs L3 approval.",
+    source: DEMO_SOURCE,
+    timestamp: "2026-09-30T01:55:00Z",
+  },
+  {
+    id: "attn-2",
+    severity: "medium",
+    systemId: "quantlab",
+    systemName: "QuantLab",
+    reason: "Open research items elevated; mobile dashboard investigation pending approval.",
+    recommendedAction: "Review pending approval for Cursor → QuantLab mobile dashboard (simulated).",
+    jarvisCanHandle: true,
+    handleNote: "Jarvis routed the task; waiting on your Approve/Reject. No live execution.",
+    source: DEMO_SOURCE,
+    timestamp: "2026-09-29T23:10:00Z",
+  },
+  {
+    id: "attn-3",
+    severity: "low",
+    systemId: "personal",
+    systemName: "Personal",
+    reason: "Planning block later today — calendar adapter not configured.",
+    recommendedAction: "Confirm priorities manually; Google Calendar remains Not configured.",
+    jarvisCanHandle: true,
+    handleNote: "Jarvis can list DEMO_FIXTURE schedule only — no calendar sync.",
+    source: DEMO_SOURCE,
+    timestamp: "2026-09-30T00:30:00Z",
   },
 ];
 
