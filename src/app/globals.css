@@ -1,0 +1,233 @@
+@import "tailwindcss";
+
+:root {
+  --bg-deep: #03060d;
+  --bg-navy: #070b16;
+  --bg-panel: rgba(10, 18, 36, 0.72);
+  --bg-panel-solid: #0a1224;
+  --border: rgba(56, 189, 248, 0.18);
+  --border-strong: rgba(56, 189, 248, 0.35);
+  --cyan: #38bdf8;
+  --cyan-dim: #0ea5e9;
+  --electric: #22d3ee;
+  --health: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --text: #e8f1ff;
+  --text-muted: #8ba3c7;
+  --glow: 0 0 24px rgba(34, 211, 238, 0.15);
+  --font-display: var(--font-orbitron);
+  --font-body: var(--font-ibm-plex);
+  --font-mono: var(--font-jetbrains);
+}
+
+@theme inline {
+  --color-background: var(--bg-deep);
+  --color-foreground: var(--text);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text);
+  font-family: var(--font-body), ui-sans-serif, sans-serif;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(14, 165, 233, 0.12), transparent 55%),
+    radial-gradient(ellipse 40% 30% at 90% 20%, rgba(34, 211, 238, 0.06), transparent 50%),
+    radial-gradient(ellipse 35% 25% at 10% 80%, rgba(52, 211, 153, 0.04), transparent 45%),
+    linear-gradient(180deg, var(--bg-navy) 0%, var(--bg-deep) 100%);
+  background-attachment: fixed;
+}
+
+/* Subtle star field — CSS only, no distraction */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.35;
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, rgba(232, 241, 255, 0.45), transparent),
+    radial-gradient(1px 1px at 70% 15%, rgba(56, 189, 248, 0.35), transparent),
+    radial-gradient(1px 1px at 40% 70%, rgba(232, 241, 255, 0.3), transparent),
+    radial-gradient(1px 1px at 85% 60%, rgba(34, 211, 238, 0.25), transparent),
+    radial-gradient(1.5px 1.5px at 55% 45%, rgba(232, 241, 255, 0.2), transparent);
+  background-size: 100% 100%;
+}
+
+.mos-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.glass {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--glow);
+}
+
+.glass-strong {
+  background: rgba(8, 14, 28, 0.88);
+  border: 1px solid var(--border-strong);
+  backdrop-filter: blur(16px);
+}
+
+.display-font {
+  font-family: var(--font-display), ui-sans-serif, sans-serif;
+  letter-spacing: 0.08em;
+}
+
+.mono {
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
+.cyan-text {
+  color: var(--cyan);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.health-text {
+  color: var(--health);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  background: rgba(14, 165, 233, 0.08);
+  color: var(--text);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+  background: rgba(34, 211, 238, 0.12);
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  border: 1px solid var(--cyan);
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.25), rgba(14, 165, 233, 0.08));
+  color: var(--text);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: box-shadow 0.2s, background 0.2s;
+}
+
+.btn-primary:hover {
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.25);
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.btn-ghost:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  background: rgba(248, 113, 113, 0.1);
+  color: #fecaca;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.input-command {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-strong);
+  background: rgba(3, 6, 13, 0.7);
+  color: var(--text);
+  font-size: 0.95rem;
+  outline: none;
+}
+
+.input-command:focus {
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.4), var(--glow);
+}
+
+.badge-demo {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: var(--warn);
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+@keyframes pulse-core {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.04); }
+}
+
+@keyframes orbit-dash {
+  to { stroke-dashoffset: -40; }
+}
+
+.core-pulse {
+  animation: pulse-core 4.5s ease-in-out infinite;
+}
+
+.orbit-line {
+  stroke-dasharray: 4 6;
+  animation: orbit-dash 18s linear infinite;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.25);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}

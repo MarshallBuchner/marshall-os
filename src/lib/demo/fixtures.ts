@@ -1,0 +1,371 @@
+/**
+ * DEMO_MODE fixtures — distinguishable from production.
+ * All values here are synthetic demo data for Marshall OS V0.
+ * Never treat as live metrics, credentials, or real integrations.
+ */
+
+import type {
+  ActivityEvent,
+  Agent,
+  ApprovalRequest,
+  AutomationDefinition,
+  KnowledgeNode,
+  Project,
+  ScheduleItem,
+} from "@/types";
+
+export const DEMO_MODE = true as const;
+export const DEMO_SOURCE = "DEMO_FIXTURE" as const;
+
+export const DEMO_PROJECTS: Project[] = [
+  {
+    id: "powr",
+    name: "POWR",
+    description: "Sports tech platform — athlete performance and community.",
+    category: "Sports Tech",
+    repository: "github.com/marshall/powr",
+    deployment: "vercel:powr-app",
+    database: "supabase:powr",
+    status: "online",
+    tools: ["github", "vercel", "supabase", "stripe"],
+    permissions: ["L1_READ", "L2_REVERSIBLE", "L3_IMPORTANT"],
+    metadata: { focus: "product", priority: "high" },
+    demoMetrics: {
+      source: DEMO_SOURCE,
+      health: 94,
+      openItems: 3,
+      lastDeploy: "2026-09-29T18:40:00Z",
+      primaryMetricLabel: "Weekly active athletes",
+      primaryMetricValue: "12.4k (demo)",
+    },
+  },
+  {
+    id: "quantlab",
+    name: "QuantLab",
+    description:
+      "AI trading research workspace. Eventual posture: READ-ONLY analytics. No live trading in V0.",
+    category: "AI Trading Research",
+    repository: "github.com/marshall/quantlab",
+    deployment: "vercel:quantlab-research",
+    database: "supabase:quantlab",
+    status: "online",
+    tools: ["github", "vercel", "openai"],
+    permissions: ["L1_READ", "L2_REVERSIBLE"],
+    metadata: { trading: false, mode: "research-readonly" },
+    demoMetrics: {
+      source: DEMO_SOURCE,
+      health: 88,
+      openItems: 5,
+      lastDeploy: "2026-09-28T14:10:00Z",
+      primaryMetricLabel: "Backtest runs (demo)",
+      primaryMetricValue: "47",
+    },
+  },
+  {
+    id: "northstar",
+    name: "Northstar",
+    description: "Machine Shop OS — operations, jobs, and shop floor tooling.",
+    category: "Machine Shop OS",
+    repository: "github.com/marshall/northstar",
+    deployment: "vercel:northstar-os",
+    database: "supabase:northstar",
+    status: "degraded",
+    tools: ["github", "vercel", "supabase"],
+    permissions: ["L1_READ", "L2_REVERSIBLE", "L3_IMPORTANT"],
+    metadata: { focus: "ops" },
+    demoMetrics: {
+      source: DEMO_SOURCE,
+      health: 72,
+      openItems: 7,
+      lastDeploy: "2026-09-27T09:00:00Z",
+      primaryMetricLabel: "Open shop jobs (demo)",
+      primaryMetricValue: "18",
+    },
+  },
+  {
+    id: "build-lab",
+    name: "Build Lab",
+    description: "Experiments sandbox for prototypes and spike work.",
+    category: "Experiments",
+    repository: "github.com/marshall/build-lab",
+    deployment: null,
+    database: null,
+    status: "online",
+    tools: ["github", "cursor"],
+    permissions: ["L1_READ", "L2_REVERSIBLE"],
+    metadata: { experimental: true },
+    demoMetrics: {
+      source: DEMO_SOURCE,
+      health: 100,
+      openItems: 2,
+      lastDeploy: "n/a",
+      primaryMetricLabel: "Active spikes (demo)",
+      primaryMetricValue: "4",
+    },
+  },
+  {
+    id: "personal",
+    name: "Personal",
+    description: "Life & planning — calendar, priorities, personal systems.",
+    category: "Life & Planning",
+    repository: null,
+    deployment: null,
+    database: null,
+    status: "online",
+    tools: ["google-calendar", "gmail"],
+    permissions: ["L1_READ", "L2_REVERSIBLE"],
+    metadata: { private: true },
+    demoMetrics: {
+      source: DEMO_SOURCE,
+      health: 96,
+      openItems: 4,
+      lastDeploy: "n/a",
+      primaryMetricLabel: "Priorities today (demo)",
+      primaryMetricValue: "6",
+    },
+  },
+];
+
+export const DEMO_AGENTS: Agent[] = [
+  {
+    id: "openai",
+    name: "OpenAI",
+    provider: "OpenAI",
+    role: "General reasoning & summarization",
+    status: "needs_config",
+    capabilities: ["summarize", "analyze", "draft"],
+    permissionLevel: "L2_REVERSIBLE",
+    lastActivity: "Never (not configured)",
+    recentTasks: [],
+  },
+  {
+    id: "cursor",
+    name: "Cursor Agent",
+    provider: "Cursor",
+    role: "Code investigation & implementation",
+    status: "ready",
+    capabilities: ["code_investigate", "refactor_plan", "repo_search"],
+    permissionLevel: "L3_IMPORTANT",
+    lastActivity: "2026-09-29T22:15:00Z",
+    recentTasks: [
+      "Investigate QuantLab mobile dashboard (simulated)",
+      "Review POWR API error surface (simulated)",
+    ],
+  },
+  {
+    id: "claude",
+    name: "Claude",
+    provider: "Anthropic",
+    role: "Deep analysis & writing",
+    status: "needs_config",
+    capabilities: ["deep_analysis", "docs", "planning"],
+    permissionLevel: "L2_REVERSIBLE",
+    lastActivity: "Never (not configured)",
+    recentTasks: [],
+  },
+  {
+    id: "grok",
+    name: "Grok",
+    provider: "xAI",
+    role: "Fast research & lateral ideation",
+    status: "needs_config",
+    capabilities: ["research", "ideation", "web_context"],
+    permissionLevel: "L2_REVERSIBLE",
+    lastActivity: "Never (not configured)",
+    recentTasks: [],
+  },
+];
+
+export const DEMO_ACTIVITY: ActivityEvent[] = [
+  {
+    id: "act-1",
+    timestamp: "2026-09-30T02:40:00Z",
+    what: "POWR deploy health check (demo)",
+    who: "system",
+    why: "Scheduled demo heartbeat",
+    whatChanged: "Health score recorded as 94",
+    approved: null,
+    severity: "success",
+    projectId: "powr",
+    source: DEMO_SOURCE,
+  },
+  {
+    id: "act-2",
+    timestamp: "2026-09-30T01:55:00Z",
+    what: "Northstar job queue lag flagged",
+    who: "jarvis-demo",
+    why: "Attention scan",
+    whatChanged: "Status marked degraded (demo)",
+    approved: null,
+    severity: "warning",
+    projectId: "northstar",
+    source: DEMO_SOURCE,
+  },
+  {
+    id: "act-3",
+    timestamp: "2026-09-29T23:10:00Z",
+    what: "Cursor task planned for QuantLab",
+    who: "marshall",
+    why: "User command via Jarvis",
+    whatChanged: "Approval request created (simulated)",
+    approved: false,
+    severity: "info",
+    projectId: "quantlab",
+    source: DEMO_SOURCE,
+  },
+  {
+    id: "act-4",
+    timestamp: "2026-09-29T21:00:00Z",
+    what: "Build Lab spike closed",
+    who: "marshall",
+    why: "Manual update",
+    whatChanged: "Open items 3 → 2 (demo)",
+    approved: null,
+    severity: "info",
+    projectId: "build-lab",
+    source: DEMO_SOURCE,
+  },
+  {
+    id: "act-5",
+    timestamp: "2026-09-29T19:30:00Z",
+    what: "Personal priorities refreshed",
+    who: "system",
+    why: "Demo calendar sync placeholder",
+    whatChanged: "6 priorities loaded from fixture",
+    approved: null,
+    severity: "info",
+    projectId: "personal",
+    source: DEMO_SOURCE,
+  },
+];
+
+export const DEMO_SCHEDULE: ScheduleItem[] = [
+  {
+    id: "sch-1",
+    title: "POWR product sync",
+    start: "2026-09-30T14:00:00Z",
+    end: "2026-09-30T14:30:00Z",
+    projectId: "powr",
+    source: DEMO_SOURCE,
+  },
+  {
+    id: "sch-2",
+    title: "QuantLab research review (read-only)",
+    start: "2026-09-30T16:00:00Z",
+    end: "2026-09-30T17:00:00Z",
+    projectId: "quantlab",
+    source: DEMO_SOURCE,
+  },
+  {
+    id: "sch-3",
+    title: "Northstar shop walkthrough",
+    start: "2026-09-30T18:30:00Z",
+    end: "2026-09-30T19:00:00Z",
+    projectId: "northstar",
+    source: DEMO_SOURCE,
+  },
+  {
+    id: "sch-4",
+    title: "Personal planning block",
+    start: "2026-09-30T21:00:00Z",
+    end: "2026-09-30T21:45:00Z",
+    projectId: "personal",
+    source: DEMO_SOURCE,
+  },
+];
+
+export const DEMO_AUTOMATIONS: AutomationDefinition[] = [
+  {
+    id: "auto-1",
+    name: "Morning attention brief",
+    type: "scheduled",
+    description: "Example: summarize items needing attention at 08:00 local.",
+    trigger: "cron: 0 8 * * *",
+    action: "jarvis.attention_summary",
+    enabled: false,
+    exampleOnly: true,
+    projectId: null,
+  },
+  {
+    id: "auto-2",
+    name: "Northstar degradation alert",
+    type: "condition",
+    description: "Example: when health < 80, open approval for investigation.",
+    trigger: "condition: project.health < 80",
+    action: "approval.create_investigation",
+    enabled: false,
+    exampleOnly: true,
+    projectId: "northstar",
+  },
+  {
+    id: "auto-3",
+    name: "POWR deploy event note",
+    type: "event",
+    description: "Example: on Vercel deploy success, append activity log entry.",
+    trigger: "event: vercel.deploy.success",
+    action: "activity.log_deploy",
+    enabled: false,
+    exampleOnly: true,
+    projectId: "powr",
+  },
+];
+
+export const DEMO_KNOWLEDGE: KnowledgeNode[] = [
+  {
+    id: "kn-1",
+    title: "QuantLab posture: research read-only",
+    kind: "decision",
+    summary:
+      "No live trading. Analytics and backtests only. L4 / trading execution out of scope for V0.",
+    projectId: "quantlab",
+    tags: ["trading", "policy", "safety"],
+    updatedAt: "2026-09-28T12:00:00Z",
+    source: DEMO_SOURCE,
+  },
+  {
+    id: "kn-2",
+    title: "POWR deploy checklist",
+    kind: "runbook",
+    summary: "Pre-deploy smoke checks for athlete feed and Stripe webhooks (placeholder).",
+    projectId: "powr",
+    tags: ["deploy", "powr"],
+    updatedAt: "2026-09-26T10:00:00Z",
+    source: DEMO_SOURCE,
+  },
+  {
+    id: "kn-3",
+    title: "Jarvis permission ladder",
+    kind: "doc",
+    summary: "L1 read → L2 reversible → L3 important approval → L4 sensitive (no execution in V0).",
+    projectId: null,
+    tags: ["jarvis", "permissions"],
+    updatedAt: "2026-09-30T00:00:00Z",
+    source: DEMO_SOURCE,
+  },
+];
+
+export const DEMO_PENDING_APPROVALS: ApprovalRequest[] = [
+  {
+    id: "apr-demo-1",
+    commandId: "cmd-demo-1",
+    actionLabel: "Investigate QuantLab mobile dashboard",
+    agentId: "cursor",
+    projectId: "quantlab",
+    permissionLevel: "L3_IMPORTANT",
+    description:
+      "Have Cursor Agent inspect QuantLab mobile dashboard issues and return findings.",
+    effect:
+      "Simulated handoff only — no repo writes, no external API calls in V0.",
+    timestamp: "2026-09-29T23:10:00Z",
+    status: "pending",
+    resolvedAt: null,
+  },
+];
+
+export function demoSystemsOnlineCount(projects: Project[]): number {
+  return projects.filter((p) => p.status === "online" || p.status === "degraded").length;
+}
+
+export function demoAttentionCount(projects: Project[]): number {
+  return projects.reduce((sum, p) => sum + (p.status === "degraded" ? 1 : 0) + (p.demoMetrics.openItems > 4 ? 1 : 0), 0);
+}
