@@ -82,9 +82,9 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
   const [activity, setActivity] = useState<ActivityEvent[]>(DEMO_ACTIVITY);
   const [busy, setBusy] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
-  const [consoleOpen, setConsoleOpen] = useState(true);
+  const [consoleOpen, setConsoleOpen] = useState(false);
   const [focus, setFocus] = useState<FocusTarget>(null);
-  const [activeCommandId, setActiveCommandId] = useState<string | null>("cmd-demo-1");
+  const [activeCommandId, setActiveCommandId] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>("ask");
 
   const clearFocus = useCallback(() => setFocus(null), []);

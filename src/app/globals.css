@@ -266,42 +266,36 @@ a {
   animation: pipeline-in var(--dur-mid) var(--ease-os) both;
 }
 
+/* Immersive spatial command environment — entered room, not a boxed diagram */
+.spatial-stage {
+  min-height: min(78vh, 820px);
+  border-radius: 0;
+  border-color: rgba(120, 160, 200, 0.08);
+  box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.45);
+}
+
+.spatial-viewport {
+  position: relative;
+  min-height: min(78vh, 820px);
+  height: min(78vh, 820px);
+  background: #02050a;
+}
+
+.spatial-canvas-host {
+  touch-action: none;
+}
+
+.spatial-stage .glass {
+  border: none;
+  background: rgba(4, 8, 16, 0.55);
+  box-shadow: none;
+  backdrop-filter: blur(12px);
+  height: 100%;
+}
+
 @keyframes ambient-breathe {
   0%, 100% { transform: scale(1); opacity: 0.03; }
   50% { transform: scale(1.08); opacity: 0.055; }
-}
-
-@keyframes core-pulse {
-  0%, 100% { opacity: 0.5; transform: scale(1); }
-  50% { opacity: 0.85; transform: scale(1.03); }
-}
-
-@keyframes orbit-spin {
-  to { stroke-dashoffset: -48; }
-}
-
-@keyframes ring-rotate {
-  to { transform: rotate(360deg); }
-}
-
-.core-pulse {
-  animation: core-pulse 5.5s ease-in-out infinite;
-  transform-origin: center;
-}
-
-.orbit-line {
-  stroke-dasharray: 3 7;
-  animation: orbit-spin 22s linear infinite;
-}
-
-.ring-rotate {
-  transform-origin: 50px 50px;
-  animation: ring-rotate 48s linear infinite;
-}
-
-.ring-rotate-rev {
-  transform-origin: 50px 50px;
-  animation: ring-rotate 72s linear infinite reverse;
 }
 
 .scrollbar-thin::-webkit-scrollbar {

@@ -20,10 +20,11 @@ export function FocusPanel() {
       <aside className="glass hidden h-full flex-col p-4 lg:flex">
         <h2 className="display-font text-[11px] text-[var(--electric)]">CONTEXT</h2>
         <p className="mt-3 text-sm text-[var(--text-muted)]">
-          Select a system or agent node to enter focus mode. Jarvis stays centered.
+          Approach a module to bring it into reading position. Jarvis inhabits the room —
+          detail and metrics stay here.
         </p>
         <p className="mt-4 mono text-[10px] text-[var(--text-muted)]">
-          Overview answers: what&apos;s happening · what needs you · what Jarvis can handle
+          Spatial = presence · DOM = readable command surface
         </p>
       </aside>
     );

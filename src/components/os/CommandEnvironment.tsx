@@ -2,7 +2,7 @@
 
 import { StatusStrip } from "@/components/os/StatusStrip";
 import { CommandConsole } from "@/components/os/CommandConsole";
-import { JarvisTopology } from "@/components/os/JarvisTopology";
+import { SpatialCore } from "@/components/os/spatial/SpatialCore";
 import { FocusPanel } from "@/components/os/FocusPanel";
 import { AttentionBoard } from "@/components/os/AttentionBoard";
 import { SystemActivity } from "@/components/os/SystemActivity";
@@ -27,20 +27,23 @@ export function CommandEnvironment({
     <div className="space-y-4 md:space-y-5">
       <StatusStrip projects={projects} systemsOnline={systemsOnline} />
 
-      {/* Mobile: Jarvis remote — no giant topology */}
+      {/* Mobile: Jarvis remote — no giant 3D topology */}
       <MobileRemote activitySeed={activitySeed} />
 
-      {/* Desktop / tablet: full OS composition */}
+      {/* Desktop / tablet */}
       <div className="hidden space-y-5 lg:block">
         <CommandConsole />
 
+        {/* Immersive spatial window + DOM context panel */}
         <div
-          className={`grid gap-4 transition-[grid-template-columns] duration-500 ${
-            focus ? "xl:grid-cols-[1.35fr_0.85fr]" : "xl:grid-cols-[1.5fr_0.7fr]"
+          className={`spatial-stage grid gap-0 overflow-hidden border border-[var(--border)] bg-[rgba(2,4,10,0.4)] transition-[grid-template-columns] duration-500 ${
+            focus ? "xl:grid-cols-[minmax(0,1fr)_320px]" : "xl:grid-cols-[minmax(0,1fr)_280px]"
           }`}
         >
-          <JarvisTopology />
-          <FocusPanel />
+          <SpatialCore />
+          <div className="border-l border-[var(--border)] bg-[rgba(6,10,20,0.72)] backdrop-blur-md">
+            <FocusPanel />
+          </div>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2" id="system-activity">
@@ -52,7 +55,6 @@ export function CommandEnvironment({
         <ApprovalCenter />
       </div>
 
-      {/* Focus panel on tablet when selected from mobile systems list */}
       <div className="lg:hidden">{focus && <FocusPanel />}</div>
     </div>
   );
