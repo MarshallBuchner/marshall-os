@@ -19,12 +19,21 @@ import {
 } from "@/lib/jarvis/visualState";
 import { jarvisMotionClock } from "@/lib/jarvis/motionClock";
 import { jarvisExperienceClock } from "@/lib/jarvis/experienceClock";
-import { createBrowserSttAdapter } from "@/lib/voice/speechRecognition";
+import {
+  createBrowserSttAdapter,
+  type BrowserSttAdapter,
+} from "@/lib/voice/speechRecognition";
 import {
   createBrowserTtsAdapter,
   jarvisPhraseFor,
 } from "@/lib/voice/speechSynthesis";
 import { WAKE_WORD_CONFIG } from "@/lib/voice/wakeWord";
+import { cleanTranscriptDisplay } from "@/lib/voice/normalizeTranscript";
+import {
+  isNonDestructiveVoiceIntent,
+  isStableInterim,
+  parseVoiceIntent,
+} from "@/lib/voice/voiceIntents";
 
 export type FocusTarget =
   | { kind: "system"; id: string }
@@ -73,6 +82,8 @@ type JarvisContextValue = {
   setVoiceMuted: (muted: boolean) => void;
   startListening: () => Promise<void>;
   stopListening: () => void;
+  /** True after explicit mic start until user stops — hands-free chain */
+  voiceSessionActive: boolean;
   transcript: string;
   voiceError: string | null;
   audioLevel: number;
@@ -149,11 +160,22 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
   const [presence, setPresence] = useState<PresenceMode>("core");
   const [transformProgress, setTransformProgress] = useState(0);
   const [presenceDiagnostic, setPresenceDiagnostic] = useState<string | null>(null);
+  const [voiceSessionActive, setVoiceSessionActive] = useState(false);
 
-  const sttRef = useRef<ReturnType<typeof createBrowserSttAdapter> | null>(null);
+  const sttRef = useRef<BrowserSttAdapter | null>(null);
   const ttsRef = useRef<ReturnType<typeof createBrowserTtsAdapter> | null>(null);
   const pendingTranscript = useRef("");
   const finalTranscript = useRef("");
+  const presenceRef = useRef<PresenceMode>("core");
+  const approvalsRef = useRef(approvals);
+  const lastInterimRef = useRef({ text: "", since: 0 });
+  const lastExecutedRef = useRef({ key: "", at: 0 });
+  const executeVoiceRef = useRef<(raw: string, fromFinal: boolean) => void>(() => {});
+
+  useEffect(() => {
+    presenceRef.current = presence;
+    approvalsRef.current = approvals;
+  }, [presence, approvals]);
 
   useEffect(() => {
     sttRef.current = createBrowserSttAdapter();
@@ -195,6 +217,10 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
   const speak = useCallback(async (text: string) => {
     const tts = ttsRef.current;
     if (!tts?.available || tts.muted || !text) return;
+    const stt = sttRef.current;
+    // Pause recognition during TTS so Safari doesn't eat the next phrase
+    stt?.pauseForTts();
+    setListening(false);
     setSpeaking(true);
     setAudioLevel(0.45);
     try {
@@ -202,6 +228,10 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     } finally {
       setSpeaking(false);
       setAudioLevel(0);
+      if (stt?.sessionActive) {
+        setListening(true);
+        stt.resumeAfterTts();
+      }
     }
   }, []);
 
@@ -288,38 +318,43 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
 
   const submit = useCallback(
     async (input: string) => {
-      const trimmed = input.trim();
+      const trimmed = cleanTranscriptDisplay(input);
       if (!trimmed) return null;
-      const lower = trimmed.toLowerCase();
 
-      // Local presence choreography — not a server command
-      if (
-        /transform into human|become human|human form|show yourself|appear as/.test(
-          lower,
-        )
-      ) {
+      // Local presence / show intents — shared with voice path
+      const voiceIntent = parseVoiceIntent(trimmed);
+      if (voiceIntent.kind === "TRANSFORM_HUMANOID") {
         beginTransform();
         return null;
       }
-      if (
-        /return to core|dismiss presence|back to core|return to jarvis core/.test(lower) &&
-        presence !== "core"
-      ) {
-        returnToCore();
+      if (voiceIntent.kind === "RETURN_TO_CORE") {
+        if (presenceRef.current !== "core") returnToCore();
+        return null;
+      }
+      if (voiceIntent.kind === "SHOW_SYSTEM") {
+        setFocus({ kind: "system", id: voiceIntent.projectId });
+        setContextPanel("focus");
+        setAwake(true);
+        void speak(jarvisPhraseFor("ack"));
         return null;
       }
 
+      const pipelineInput =
+        voiceIntent.kind === "PIPELINE" && voiceIntent.displayText
+          ? voiceIntent.displayText
+          : trimmed;
+      const lower = pipelineInput.toLowerCase();
       setBusy(true);
       setAwake(true);
       setVoiceError(null);
       jarvisMotionClock.beginCommandFlow({
-        requiresApproval: /approve|cursor|investigate|deploy/i.test(trimmed),
+        requiresApproval: /approve|cursor|investigate|deploy/i.test(pipelineInput),
       });
       try {
         const res = await fetch("/api/jarvis", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input: trimmed }),
+          body: JSON.stringify({ input: pipelineInput }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Failed");
@@ -363,7 +398,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
         setBusy(false);
       }
     },
-    [speak, beginTransform, returnToCore, presence],
+    [speak, beginTransform, returnToCore],
   );
 
   const resolve = useCallback(
@@ -402,10 +437,73 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     [refresh, speak],
   );
 
+  const executeVoiceCommand = useCallback(
+    (raw: string, fromFinal: boolean) => {
+      const display = cleanTranscriptDisplay(raw);
+      if (!display) return;
+      const intent = parseVoiceIntent(display);
+      if (!intent.normalized && intent.kind === "PIPELINE") return;
+
+      // Consequential actions require finalized transcripts
+      if (!fromFinal && !isNonDestructiveVoiceIntent(intent.kind)) return;
+      if (!fromFinal && intent.confidence < 0.85) return;
+
+      const key = `${intent.kind}:${intent.normalized}`;
+      const now = Date.now();
+      if (lastExecutedRef.current.key === key && now - lastExecutedRef.current.at < 2200) {
+        return;
+      }
+      lastExecutedRef.current = { key, at: now };
+
+      setTranscript(display);
+      finalTranscript.current = "";
+      pendingTranscript.current = "";
+      lastInterimRef.current = { text: "", since: 0 };
+
+      if (intent.kind === "TRANSFORM_HUMANOID") {
+        beginTransform();
+        return;
+      }
+      if (intent.kind === "RETURN_TO_CORE") {
+        if (presenceRef.current !== "core") returnToCore();
+        return;
+      }
+      if (intent.kind === "SHOW_SYSTEM") {
+        setFocus({ kind: "system", id: intent.projectId });
+        setContextPanel("focus");
+        setAwake(true);
+        void speak(jarvisPhraseFor("ack"));
+        return;
+      }
+      if (intent.kind === "APPROVE" || intent.kind === "REJECT") {
+        if (!fromFinal) return;
+        const pending = approvalsRef.current.filter((a) => a.status === "pending");
+        if (pending.length !== 1) return;
+        void resolve(
+          pending[0].id,
+          intent.kind === "APPROVE" ? "approved" : "rejected",
+        );
+        return;
+      }
+      if (intent.kind === "PIPELINE" && fromFinal) {
+        void submit(intent.displayText || display);
+      }
+    },
+    [beginTransform, returnToCore, resolve, submit, speak],
+  );
+
+  useEffect(() => {
+    executeVoiceRef.current = executeVoiceCommand;
+  }, [executeVoiceCommand]);
+
   const stopListening = useCallback(() => {
     sttRef.current?.stop();
+    setVoiceSessionActive(false);
     setListening(false);
     setAudioLevel(0);
+    pendingTranscript.current = "";
+    finalTranscript.current = "";
+    lastInterimRef.current = { text: "", since: 0 };
   }, []);
 
   const startListening = useCallback(async () => {
@@ -421,59 +519,80 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     setTranscript("");
     pendingTranscript.current = "";
     finalTranscript.current = "";
+    lastInterimRef.current = { text: "", since: 0 };
     setListening(true);
+    setVoiceSessionActive(true);
     setAwake(true);
     setAudioLevel(0.35);
 
     stt.onResult = (r) => {
-      setTranscript(r.transcript);
-      pendingTranscript.current = r.transcript;
-      setAudioLevel(0.3 + Math.min(0.5, r.transcript.length / 80));
-      // Only commit commands from final results — never interim drafts
+      const text = cleanTranscriptDisplay(r.transcript);
+      setTranscript(text);
+      pendingTranscript.current = text;
+      setAudioLevel(0.3 + Math.min(0.5, text.length / 80));
+
       if (r.isFinal) {
-        finalTranscript.current = r.transcript;
+        finalTranscript.current = text;
+        executeVoiceRef.current(text, true);
+        return;
+      }
+
+      // Stable interim → non-destructive UI intents only (transform/return/show)
+      const now = Date.now();
+      const prev = lastInterimRef.current;
+      if (text && text === prev.text) {
+        if (isStableInterim(text, prev.text, now - prev.since)) {
+          const intent = parseVoiceIntent(text);
+          if (isNonDestructiveVoiceIntent(intent.kind) && intent.confidence >= 0.85) {
+            executeVoiceRef.current(text, false);
+          }
+        }
+      } else {
+        lastInterimRef.current = { text, since: now };
       }
     };
     stt.onError = (message) => {
-      setListening(false);
-      setAudioLevel(0);
       if (message === "VOICE INPUT NOT AVAILABLE") {
+        setVoiceSessionActive(false);
+        setListening(false);
+        setAudioLevel(0);
         setVoiceError(message);
-      } else {
-        setVoiceError(`Voice error: ${message}`);
+        return;
       }
+      if (message.startsWith("Voice session ended")) {
+        setVoiceSessionActive(false);
+        setListening(false);
+        setAudioLevel(0);
+        setVoiceError(message);
+        return;
+      }
+      // Soft errors while session may still restart
+      setVoiceError(`Voice error: ${message}`);
     };
     stt.onEnd = () => {
+      // Continuous session: adapter restarts recognition; keep Listening UI if session live
+      if (stt.sessionActive) {
+        setListening(true);
+        setAudioLevel(0.28);
+        return;
+      }
       setListening(false);
       setAudioLevel(0);
+      setVoiceSessionActive(false);
       const text = finalTranscript.current.trim();
       finalTranscript.current = "";
       pendingTranscript.current = "";
-      if (text) {
-        // Voice approve/cancel only when exactly one unambiguous pending approval
-        const pending = approvals.filter((a) => a.status === "pending");
-        const lower = text.toLowerCase();
-        if (pending.length === 1) {
-          if (/^(approve|yes|confirm)\b/.test(lower)) {
-            void resolve(pending[0].id, "approved");
-            return;
-          }
-          if (/^(cancel|reject|no)\b/.test(lower)) {
-            void resolve(pending[0].id, "rejected");
-            return;
-          }
-        }
-        void submit(text);
-      }
+      if (text) executeVoiceRef.current(text, true);
     };
 
     try {
       await stt.start();
     } catch {
       setListening(false);
+      setVoiceSessionActive(false);
       setVoiceError("VOICE INPUT NOT AVAILABLE");
     }
-  }, [approvals, resolve, submit]);
+  }, []);
 
   const showAttention = useCallback(() => {
     setContextPanel("attention");
@@ -545,6 +664,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       setVoiceMuted,
       startListening,
       stopListening,
+      voiceSessionActive,
       transcript,
       voiceError,
       audioLevel,
@@ -585,6 +705,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       setVoiceMuted,
       startListening,
       stopListening,
+      voiceSessionActive,
       transcript,
       voiceError,
       audioLevel,

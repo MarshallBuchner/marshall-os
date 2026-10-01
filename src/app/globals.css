@@ -401,8 +401,8 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 48dvh;
-  padding-top: 3.5rem;
+  min-height: 52dvh;
+  padding-top: 3.25rem;
 }
 
 .jarvis-core-2d {

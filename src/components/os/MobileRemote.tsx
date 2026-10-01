@@ -20,10 +20,11 @@ type Sheet = "none" | "menu" | "attention" | "systems" | "activity" | "approvals
 export function MobileRemote({ activitySeed }: { activitySeed: ActivityEvent[] }) {
   const { setFocus, setContextPanel } = useJarvis();
   const [sheet, setSheet] = useState<Sheet>("none");
-  const [coreSize, setCoreSize] = useState(300);
+  const [coreSize, setCoreSize] = useState(340);
 
   useEffect(() => {
-    const update = () => setCoreSize(Math.min(360, Math.floor(window.innerWidth * 0.82)));
+    // Moderately larger composition — still leaves room for ask UI
+    const update = () => setCoreSize(Math.min(400, Math.floor(window.innerWidth * 0.88)));
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);

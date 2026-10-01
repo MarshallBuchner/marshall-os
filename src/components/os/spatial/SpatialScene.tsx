@@ -214,6 +214,7 @@ function SceneContent({ reducedMotion }: { reducedMotion: boolean }) {
           state={visualState}
           audioLevel={audioLevel}
           reducedMotion={reducedMotion}
+          quality="HIGH"
         />
       </group>
 

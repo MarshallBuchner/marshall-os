@@ -16,6 +16,7 @@ export function AskJarvisBar({ showPrompt = true, cinematic = true }: Props) {
     listening,
     startListening,
     stopListening,
+    voiceSessionActive,
     voiceInputAvailable,
     voiceError,
     transcript,
@@ -24,6 +25,7 @@ export function AskJarvisBar({ showPrompt = true, cinematic = true }: Props) {
     approvals,
     resolve,
     presence,
+    transformProgress,
     beginTransform,
     returnToCore,
     presenceDiagnostic,
@@ -39,7 +41,11 @@ export function AskJarvisBar({ showPrompt = true, cinematic = true }: Props) {
   }
 
   return (
-    <div className={`ask-jarvis-bar ${cinematic ? "ask-jarvis-cinematic" : ""}`}>
+    <div
+      className={`ask-jarvis-bar ${cinematic ? "ask-jarvis-cinematic" : ""}`}
+      data-presence={presence}
+      data-transform-progress={transformProgress.toFixed(3)}
+    >
       {showPrompt && <p className="ask-prompt">What can I do for you?</p>}
 
       <form
@@ -51,30 +57,35 @@ export function AskJarvisBar({ showPrompt = true, cinematic = true }: Props) {
       >
         <input
           className="ask-input"
-          value={listening && transcript ? transcript : input}
+          value={(listening || voiceSessionActive) && transcript ? transcript : input}
           onChange={(e) => setInput(e.target.value)}
           onFocus={() => setAwake(true)}
           placeholder="Ask Jarvis"
-          disabled={busy || listening || presence === "transforming" || presence === "returning"}
+          disabled={
+            busy ||
+            listening ||
+            voiceSessionActive ||
+            presence === "transforming" ||
+            presence === "returning"
+          }
           aria-label="Ask Jarvis"
         />
         <button
           type="button"
-          className={`mic-orb ${listening ? "mic-orb-live" : ""} ${
+          className={`mic-orb ${listening || voiceSessionActive ? "mic-orb-live" : ""} ${
             !voiceInputAvailable ? "mic-orb-off" : ""
           }`}
           aria-label={
             !voiceInputAvailable
               ? "Voice input not available"
-              : listening
-                ? "Stop listening"
-                : "Start voice input"
+              : voiceSessionActive || listening
+                ? "Stop voice session"
+                : "Start voice session"
           }
-          aria-pressed={listening}
-          disabled={presence === "transforming" || presence === "returning"}
+          aria-pressed={listening || voiceSessionActive}
           onClick={() => {
             if (!voiceInputAvailable) return;
-            if (listening) stopListening();
+            if (listening || voiceSessionActive) stopListening();
             else void startListening();
           }}
         >
@@ -87,9 +98,9 @@ export function AskJarvisBar({ showPrompt = true, cinematic = true }: Props) {
           {voiceError}
         </p>
       )}
-      {listening && (
+      {(listening || voiceSessionActive) && !voiceError && (
         <p className="ask-status" role="status">
-          Listening
+          {listening ? "Listening" : "Voice session"}
         </p>
       )}
       {(presence === "transforming" || presence === "returning") && (

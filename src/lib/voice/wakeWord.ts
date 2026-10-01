@@ -1,7 +1,9 @@
 /**
  * Wake-word architecture stub ONLY.
- * No always-listening. Mic remains explicit click-to-talk.
- * Future: plug a wake engine that gates startListening() behind user consent.
+ * No always-listening / no fake wake word in V0.31.
+ * Mic remains explicit click-to-talk; after that a voice *session* may continue
+ * until the user stops it. Future: plug a wake engine that gates startListening()
+ * behind user consent without changing the command pipeline.
  */
 
 export type WakeWordConfig = {
