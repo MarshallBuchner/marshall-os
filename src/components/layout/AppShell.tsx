@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { TopNav } from "@/components/layout/TopNav";
 import { JarvisProvider } from "@/components/jarvis/JarvisProvider";
 import { ApprovalCenter } from "@/components/jarvis/ApprovalCenter";
+import { VoiceDebugHud } from "@/components/os/VoiceDebugHud";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -34,6 +35,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             trading · No L4 · Adapters NOT CONFIGURED
           </footer>
         )}
+        <VoiceDebugHud />
       </div>
     </JarvisProvider>
   );

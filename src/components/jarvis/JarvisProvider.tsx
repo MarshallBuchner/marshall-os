@@ -35,6 +35,12 @@ import {
   parseVoiceIntent,
 } from "@/lib/voice/voiceIntents";
 import { getAgent, getProject } from "@/lib/registry/projects";
+import {
+  installVoiceDiagGlobals,
+  isIosWebKit,
+  isVoiceDebugEnabled,
+  voiceDiag,
+} from "@/lib/voice/voiceDiagnostics";
 
 export type FocusTarget =
   | { kind: "system"; id: string }
@@ -181,10 +187,14 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
   }, [presence, approvals]);
 
   useEffect(() => {
+    installVoiceDiagGlobals();
     sttRef.current = createBrowserSttAdapter();
     ttsRef.current = createBrowserTtsAdapter();
     setVoiceInputAvailable(sttRef.current.available);
     setVoiceOutputAvailable(ttsRef.current.available);
+    if (isVoiceDebugEnabled()) {
+      voiceDiag("VOICE_MODE", sttRef.current.getMode());
+    }
 
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     jarvisMotionClock.setReducedMotion(reduced);
@@ -217,10 +227,30 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     if (f) setContextPanel("focus");
   }, []);
 
+  /** iOS matrix flag: ?voiceTts=0 or localStorage.jarvisVoiceTts=0 disables TTS (prove STT) */
+  const iosTtsEnabled = useCallback(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      const q = new URLSearchParams(window.location.search).get("voiceTts");
+      if (q === "0" || q === "false") {
+        localStorage.setItem("jarvisVoiceTts", "0");
+        return false;
+      }
+      if (q === "1" || q === "true") {
+        localStorage.setItem("jarvisVoiceTts", "1");
+        return true;
+      }
+      if (localStorage.getItem("jarvisVoiceTts") === "0") return false;
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }, []);
+
   /**
-   * First-class spoken response — serialised queue.
-   * Pauses STT for the whole utterance so Jarvis never hears himself,
-   * drives SPEAKING + audioLevel, then resumes LISTENING if session active.
+   * Spoken response queue. Always pause STT before TTS (self-hearing).
+   * iOS: after TTS, attempt at most one fresh-instance restart; otherwise
+   * ask user to tap mic (WebKit often dies after audio playback).
    */
   const speak = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -229,13 +259,18 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     const run = async () => {
       const tts = ttsRef.current;
       if (!tts?.available || tts.muted) return;
+      // Diagnostic matrix: disable TTS on iOS to prove STT baseline
+      if (isIosWebKit() && !iosTtsEnabled()) {
+        voiceDiag("TTS_CANCEL", "ios-tts-disabled-by-flag");
+        return;
+      }
       const stt = sttRef.current;
-      // Prevent SpeechRecognition from capturing Jarvis's own voice
       stt?.pauseForTts();
       setListening(false);
       speakingRef.current = true;
       setSpeaking(true);
       setAudioLevel(0.45);
+      voiceDiag("TTS_START", trimmed.slice(0, 60));
       try {
         await tts.speak(trimmed, {
           onEnergy: (level) => {
@@ -243,12 +278,21 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
           },
         });
       } finally {
+        voiceDiag("TTS_END", trimmed.slice(0, 40));
         speakingRef.current = false;
         setSpeaking(false);
         setAudioLevel(0);
-        if (stt?.sessionActive) {
+        if (!stt?.sessionActive) return;
+        const resume = stt.resumeAfterTts();
+        if (resume.ok) {
           setListening(true);
-          stt.resumeAfterTts();
+          setVoiceError(null);
+        } else if (resume.reason === "ios-needs-gesture" || isIosWebKit()) {
+          setListening(false);
+          setVoiceError("Tap mic to continue listening.");
+        } else if (resume.attempted && !resume.ok) {
+          setListening(false);
+          setVoiceError("Tap mic to continue listening.");
         }
       }
     };
@@ -256,7 +300,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     const next = speakChainRef.current.then(run, run);
     speakChainRef.current = next.catch(() => undefined);
     return next;
-  }, []);
+  }, [iosTtsEnabled]);
 
   const setVoiceMuted = useCallback((muted: boolean) => {
     setVoiceMutedState(muted);
@@ -588,8 +632,9 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       setVoiceError("VOICE INPUT NOT AVAILABLE");
       return;
     }
-    // Interrupt TTS when user takes mic
+    // Interrupt TTS; clear speaking latch so results are never discarded (iOS hang fix)
     ttsRef.current?.stop();
+    speakingRef.current = false;
     setSpeaking(false);
     setVoiceError(null);
     setTranscript("");
@@ -600,18 +645,24 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     setVoiceSessionActive(true);
     setAwake(true);
     setAudioLevel(0.35);
+    voiceDiag("VOICE_SESSION_REQUESTED", stt.getMode());
 
     stt.onResult = (r) => {
-      // Hard ignore while Jarvis is speaking (belt + pauseForTts)
-      if (speakingRef.current) return;
+      // Only discard while TTS actively owns the mic path — not a sticky latch
+      if (speakingRef.current && stt.isPausedForTts()) {
+        voiceDiag("STT_RESULT_DISCARDED_SPEAKING", r.transcript.slice(0, 40));
+        return;
+      }
 
       const text = cleanTranscriptDisplay(r.transcript);
+      // Always surface transcript in the ask field (baseline UX)
       setTranscript(text);
       pendingTranscript.current = text;
       setAudioLevel(0.3 + Math.min(0.5, text.length / 80));
 
       if (r.isFinal) {
         finalTranscript.current = text;
+        // Turn-based: execute on final; onend will also see the same text (deduped)
         executeVoiceRef.current(text, true);
         return;
       }
@@ -638,30 +689,35 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
         setVoiceError(message);
         return;
       }
-      if (message.startsWith("Voice session ended")) {
-        setVoiceSessionActive(false);
+      if (message.startsWith("Voice session ended") || message.startsWith("Tap mic")) {
         setListening(false);
         setAudioLevel(0);
         setVoiceError(message);
         return;
       }
-      // Soft errors while session may still restart
       setVoiceError(`Voice error: ${message}`);
     };
     stt.onEnd = () => {
-      // Continuous session: adapter restarts recognition; keep Listening UI if session live
-      if (stt.sessionActive) {
+      // iOS turn-based: recognition ends after each utterance — keep session flag
+      // so TTS resume / mic retap can continue, but UI shows idle until restart.
+      const text = finalTranscript.current.trim() || pendingTranscript.current.trim();
+      if (stt.getMode() === "ios-turn") {
+        setListening(false);
+        setAudioLevel(0);
+        // Final usually already executed from onResult; dedupe-safe belt
+        if (text) executeVoiceRef.current(text, true);
+        // Keep voiceSessionActive until user stops — "tap mic to continue" after TTS
+        return;
+      }
+      // Desktop session: adapter may auto-restart between phrases
+      if (stt.sessionActive && !stt.isPausedForTts()) {
         setListening(true);
         setAudioLevel(0.28);
         return;
       }
       setListening(false);
       setAudioLevel(0);
-      setVoiceSessionActive(false);
-      const text = finalTranscript.current.trim();
-      finalTranscript.current = "";
-      pendingTranscript.current = "";
-      if (text) executeVoiceRef.current(text, true);
+      if (!stt.sessionActive) setVoiceSessionActive(false);
     };
 
     try {

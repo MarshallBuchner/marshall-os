@@ -1,10 +1,16 @@
 /**
  * Browser SpeechRecognition STT — explicit user gesture only.
- * Feature-detects webkitSpeechRecognition / SpeechRecognition.
- * Supports a single-instance continuous voice session with safe Safari restarts.
+ *
+ * iOS/WebKit strategy (post-regression): turn-based by default.
+ *   tap → start → interim/final → clean stop → command → (optional TTS) → new instance
+ * Desktop may use light session restart; never tight-loop after TTS on iOS.
  */
 
-import type { SpeechRecognitionResult, SpeechToTextAdapter } from "@/lib/voice/types";
+import type { SpeechToTextAdapter } from "@/lib/voice/types";
+import {
+  isIosWebKit,
+  voiceDiag,
+} from "@/lib/voice/voiceDiagnostics";
 
 type BrowserSpeechRecognition = {
   continuous: boolean;
@@ -18,6 +24,8 @@ type BrowserSpeechRecognition = {
   onerror: ((ev: { error: string }) => void) | null;
   onend: (() => void) | null;
   onstart: (() => void) | null;
+  onaudiostart?: (() => void) | null;
+  onspeechstart?: (() => void) | null;
 };
 
 type SpeechRecognitionEventLike = {
@@ -27,11 +35,6 @@ type SpeechRecognitionEventLike = {
     0: { transcript: string; confidence: number };
   }>;
   resultIndex: number;
-};
-
-export type SttSessionOptions = {
-  /** Keep recognition alive across Safari onend while session is active */
-  continuousSession?: boolean;
 };
 
 function getSpeechRecognitionCtor():
@@ -50,17 +53,26 @@ export function isSpeechRecognitionAvailable(): boolean {
 }
 
 export type BrowserSttAdapter = SpeechToTextAdapter & {
-  /** Whether a voice session wants recognition kept alive */
   sessionActive: boolean;
   setSessionActive(active: boolean): void;
-  /** Pause recognition without ending the logical session (e.g. during TTS) */
+  /** True while TTS owns the audio path */
+  isPausedForTts(): boolean;
   pauseForTts(): void;
-  /** Resume recognition if session still active */
-  resumeAfterTts(): void;
+  /**
+   * Attempt to resume listening after TTS.
+   * On iOS: creates a fresh instance once; reports failure instead of looping.
+   */
+  resumeAfterTts(): { attempted: boolean; ok: boolean; reason?: string };
+  /** Platform mode for diagnostics */
+  getMode(): "ios-turn" | "desktop-session";
 };
 
 export function createBrowserSttAdapter(): BrowserSttAdapter {
   const Ctor = getSpeechRecognitionCtor();
+  const ios = typeof navigator !== "undefined" ? isIosWebKit() : false;
+  /** iOS: turn-based continuous=false, fresh instance every start */
+  const turnBased = ios;
+
   let recognition: BrowserSpeechRecognition | null = null;
   let sessionActive = false;
   let pausingForTts = false;
@@ -68,7 +80,9 @@ export function createBrowserSttAdapter(): BrowserSttAdapter {
   let running = false;
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
   let restartAttempts = 0;
-  const MAX_RESTARTS_BURST = 8;
+  const MAX_POST_TTS_RESTART = 1;
+
+  voiceDiag("VOICE_MODE", turnBased ? "ios-turn" : "desktop-session");
 
   const clearRestart = () => {
     if (restartTimer != null) {
@@ -77,24 +91,38 @@ export function createBrowserSttAdapter(): BrowserSttAdapter {
     }
   };
 
-  const ensureInstance = () => {
-    if (!Ctor) return null;
-    if (recognition) return recognition;
-    recognition = new Ctor();
-    recognition.lang = "en-US";
-    recognition.interimResults = true;
-    recognition.continuous = true;
-    if (typeof recognition.maxAlternatives === "number") {
-      recognition.maxAlternatives = 1;
+  const destroyInstance = () => {
+    if (!recognition) return;
+    recognition.onresult = null;
+    recognition.onerror = null;
+    recognition.onend = null;
+    recognition.onstart = null;
+    if (recognition.onaudiostart) recognition.onaudiostart = null;
+    if (recognition.onspeechstart) recognition.onspeechstart = null;
+    try {
+      recognition.abort();
+    } catch {
+      /* ignore */
     }
+    recognition = null;
+    running = false;
+  };
 
-    recognition.onstart = () => {
+  const bindInstance = (rec: BrowserSpeechRecognition) => {
+    rec.lang = "en-US";
+    rec.interimResults = true;
+    // iOS WebKit: continuous=true is unreliable and can suppress results
+    rec.continuous = turnBased ? false : true;
+    if (typeof rec.maxAlternatives === "number") rec.maxAlternatives = 1;
+
+    rec.onstart = () => {
       running = true;
-      restartAttempts = 0;
+      voiceDiag("STT_ONSTART");
     };
+    rec.onaudiostart = () => voiceDiag("STT_AUDIOSTART");
+    rec.onspeechstart = () => voiceDiag("STT_SPEECHSTART");
 
-    recognition.onresult = (ev) => {
-      // Prefer latest result chunk; accumulate finals for continuous mode
+    rec.onresult = (ev) => {
       let interim = "";
       let finalPiece = "";
       let confidence = 0;
@@ -106,13 +134,14 @@ export function createBrowserSttAdapter(): BrowserSttAdapter {
         else interim += piece[0].transcript;
       }
       if (finalPiece) {
-        const payload: SpeechRecognitionResult = {
+        voiceDiag("STT_FINAL_RESULT", finalPiece.slice(0, 80));
+        adapter.onResult?.({
           transcript: finalPiece,
           confidence: confidence || 0.85,
           isFinal: true,
-        };
-        adapter.onResult?.(payload);
+        });
       } else if (interim) {
+        voiceDiag("STT_INTERIM_RESULT", interim.slice(0, 80));
         adapter.onResult?.({
           transcript: interim,
           confidence: confidence || 0.4,
@@ -121,73 +150,79 @@ export function createBrowserSttAdapter(): BrowserSttAdapter {
       }
     };
 
-    recognition.onerror = (ev) => {
+    rec.onerror = (ev) => {
       const err = ev.error || "recognition error";
-      // Benign / recoverable while session active
-      if (err === "aborted") {
-        running = false;
-        return;
-      }
-      if (err === "no-speech" || err === "audio-capture") {
-        running = false;
-        // Let onend handle session restart
+      running = false;
+      voiceDiag("STT_ERROR", err);
+      if (err === "aborted") return;
+      if (err === "no-speech") {
+        // Turn ends; let onend fire
         return;
       }
       if (err === "not-allowed" || err === "service-not-allowed") {
-        running = false;
         sessionActive = false;
         clearRestart();
         adapter.onError?.("VOICE INPUT NOT AVAILABLE");
         return;
       }
-      if (err === "network") {
-        running = false;
+      if (err === "network" || err === "audio-capture") {
         adapter.onError?.(`Voice error: ${err}`);
         return;
       }
-      // Other errors — report but allow session end handler to decide
-      running = false;
-      if (!sessionActive) {
-        adapter.onError?.(err);
-      }
+      if (!sessionActive) adapter.onError?.(err);
     };
 
-    recognition.onend = () => {
+    rec.onend = () => {
       running = false;
+      voiceDiag("STT_ONEND", `pausingForTts=${pausingForTts} session=${sessionActive}`);
       if (userStopping || pausingForTts) {
         adapter.onEnd?.();
         return;
       }
-      if (sessionActive) {
-        // Safari often ends recognition after a phrase — safe restart
-        scheduleRestart();
+      // Turn-based: one shot complete — do not auto-loop (provider runs command)
+      if (turnBased) {
+        voiceDiag("STT_TURN_COMPLETE");
         adapter.onEnd?.();
         return;
       }
+      // Desktop session: gentle restart between phrases (not after TTS — see resumeAfterTts)
+      if (sessionActive) {
+        scheduleDesktopRestart();
+      }
       adapter.onEnd?.();
     };
+  };
 
+  const createFreshInstance = () => {
+    if (!Ctor) return null;
+    destroyInstance();
+    recognition = new Ctor();
+    voiceDiag("STT_INSTANCE_CREATED", turnBased ? "turn-based" : "session");
+    bindInstance(recognition);
     return recognition;
   };
 
-  const scheduleRestart = () => {
-    if (!sessionActive || pausingForTts || userStopping) return;
-    if (restartAttempts >= MAX_RESTARTS_BURST) {
+  const scheduleDesktopRestart = () => {
+    if (turnBased || !sessionActive || pausingForTts || userStopping) return;
+    if (restartAttempts >= 4) {
       sessionActive = false;
       adapter.onError?.("Voice session ended — tap mic to resume.");
       return;
     }
     clearRestart();
-    const delay = Math.min(1200, 180 + restartAttempts * 120);
+    const delay = Math.min(800, 200 + restartAttempts * 100);
     restartAttempts += 1;
+    voiceDiag("STT_RESTART_REQUESTED", `desktop delay=${delay}`);
     restartTimer = setTimeout(() => {
       restartTimer = null;
       if (!sessionActive || pausingForTts || userStopping || running) return;
       try {
-        const rec = ensureInstance();
+        const rec = createFreshInstance();
+        voiceDiag("STT_START_CALLED", "desktop-restart");
         rec?.start();
-      } catch {
-        // InvalidStateError if already started — ignore
+        voiceDiag("STT_RESTART_SUCCESS", "desktop");
+      } catch (e) {
+        voiceDiag("STT_RESTART_FAILURE", String(e));
       }
     }, delay);
   };
@@ -200,6 +235,9 @@ export function createBrowserSttAdapter(): BrowserSttAdapter {
     get sessionActive() {
       return sessionActive;
     },
+    getMode() {
+      return turnBased ? "ios-turn" : "desktop-session";
+    },
     setSessionActive(active: boolean) {
       sessionActive = active;
       if (!active) {
@@ -207,21 +245,55 @@ export function createBrowserSttAdapter(): BrowserSttAdapter {
         restartAttempts = 0;
       }
     },
+    isPausedForTts() {
+      return pausingForTts;
+    },
     pauseForTts() {
       pausingForTts = true;
       clearRestart();
-      userStopping = false;
+      voiceDiag("STT_PAUSE_FOR_TTS");
       try {
         recognition?.stop();
       } catch {
         /* ignore */
       }
+      // iOS: destroy instance so next start is a clean WebKit object
+      if (turnBased) {
+        destroyInstance();
+      }
     },
     resumeAfterTts() {
       pausingForTts = false;
-      if (!sessionActive) return;
+      if (!sessionActive) {
+        return { attempted: false, ok: false, reason: "session-inactive" };
+      }
+      // iOS: auto-restart after TTS is the known WebKit failure mode.
+      // Attempt at most once with a fresh instance; caller should fall back to "tap mic".
+      if (turnBased) {
+        if (restartAttempts >= MAX_POST_TTS_RESTART) {
+          voiceDiag("STT_RESTART_FAILURE", "ios-post-tts-cap");
+          return { attempted: false, ok: false, reason: "ios-needs-gesture" };
+        }
+        restartAttempts += 1;
+        voiceDiag("STT_RESTART_REQUESTED", "ios-post-tts-once");
+        try {
+          const rec = createFreshInstance();
+          if (!rec) {
+            voiceDiag("STT_RESTART_FAILURE", "no-ctor");
+            return { attempted: true, ok: false, reason: "no-ctor" };
+          }
+          voiceDiag("STT_START_CALLED", "ios-post-tts");
+          rec.start();
+          voiceDiag("STT_RESTART_SUCCESS", "ios-post-tts");
+          return { attempted: true, ok: true };
+        } catch (e) {
+          voiceDiag("STT_RESTART_FAILURE", String(e));
+          return { attempted: true, ok: false, reason: String(e) };
+        }
+      }
       restartAttempts = 0;
-      scheduleRestart();
+      scheduleDesktopRestart();
+      return { attempted: true, ok: true };
     },
     async start() {
       if (!Ctor) {
@@ -233,17 +305,20 @@ export function createBrowserSttAdapter(): BrowserSttAdapter {
       sessionActive = true;
       clearRestart();
       restartAttempts = 0;
-      const rec = ensureInstance();
+      voiceDiag("VOICE_SESSION_REQUESTED", turnBased ? "ios-turn" : "desktop-session");
+      // Always fresh instance — restores pre-regression reliability on iOS
+      const rec = createFreshInstance();
       if (!rec) {
         adapter.onError?.("VOICE INPUT NOT AVAILABLE");
         return;
       }
       if (running) return;
       try {
+        voiceDiag("STT_START_CALLED", "user-gesture");
         rec.start();
-      } catch {
-        // Already started
-        scheduleRestart();
+      } catch (e) {
+        voiceDiag("STT_ERROR", `start-threw ${String(e)}`);
+        adapter.onError?.("VOICE INPUT NOT AVAILABLE");
       }
     },
     stop() {
@@ -256,18 +331,14 @@ export function createBrowserSttAdapter(): BrowserSttAdapter {
       } catch {
         /* ignore */
       }
+      if (turnBased) destroyInstance();
     },
     abort() {
       userStopping = true;
       sessionActive = false;
       pausingForTts = false;
       clearRestart();
-      try {
-        recognition?.abort();
-      } catch {
-        /* ignore */
-      }
-      running = false;
+      destroyInstance();
     },
   };
 
