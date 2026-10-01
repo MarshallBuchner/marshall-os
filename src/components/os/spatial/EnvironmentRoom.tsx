@@ -4,23 +4,22 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
-/** Dark computational room — depth floor + fog. Not outer space / galaxy. */
+/** Full-screen computational chamber — graphite depth, not outer space */
 export function EnvironmentRoom({ reducedMotion }: { reducedMotion: boolean }) {
   const floorMat = useRef<THREE.MeshBasicMaterial>(null);
   const pulse = useRef(0);
 
-  const gridTex = useMemo(() => {
+  const floorTex = useMemo(() => {
     const size = 512;
     const canvas = document.createElement("canvas");
     canvas.width = size;
     canvas.height = size;
     const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = "#03070e";
+    ctx.fillStyle = "#05070c";
     ctx.fillRect(0, 0, size, size);
-    ctx.strokeStyle = "rgba(100, 180, 230, 0.08)";
+    ctx.strokeStyle = "rgba(120, 160, 190, 0.07)";
     ctx.lineWidth = 1;
-    const step = 48;
-    for (let i = 0; i <= size; i += step) {
+    for (let i = 0; i <= size; i += 40) {
       ctx.beginPath();
       ctx.moveTo(i, 0);
       ctx.lineTo(i, size);
@@ -30,67 +29,110 @@ export function EnvironmentRoom({ reducedMotion }: { reducedMotion: boolean }) {
       ctx.lineTo(size, i);
       ctx.stroke();
     }
+    // faint horizon band cue
+    ctx.strokeStyle = "rgba(125, 211, 252, 0.12)";
+    ctx.beginPath();
+    ctx.moveTo(0, size * 0.72);
+    ctx.lineTo(size, size * 0.72);
+    ctx.stroke();
     const tex = new THREE.CanvasTexture(canvas);
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(6, 6);
+    tex.repeat.set(8, 8);
     return tex;
   }, []);
 
   useFrame((_, dt) => {
     if (reducedMotion || !floorMat.current) return;
-    pulse.current += dt * 0.05;
-    floorMat.current.opacity = 0.32 + Math.sin(pulse.current) * 0.02;
+    pulse.current += dt * 0.04;
+    floorMat.current.opacity = 0.38 + Math.sin(pulse.current) * 0.02;
   });
 
   return (
     <group>
-      <color attach="background" args={["#02050a"]} />
-      <fog attach="fog" args={["#02050a", 6, 16]} />
+      <color attach="background" args={["#03050a"]} />
+      <fog attach="fog" args={["#03050a", 7, 22]} />
 
-      <ambientLight intensity={0.16} />
-      <directionalLight position={[2, 6, 4]} intensity={0.25} color="#d4eaff" />
-      <pointLight position={[0, 2.2, 1.5]} intensity={0.55} color="#7dd3fc" distance={10} />
-      <pointLight position={[-2, 1.5, -1]} intensity={0.12} color="#a78bfa" distance={8} />
+      <ambientLight intensity={0.14} />
+      <directionalLight position={[3, 8, 4]} intensity={0.22} color="#dcecff" />
+      <pointLight position={[0, 3.5, 1.2]} intensity={0.85} color="#7dd3fc" distance={16} />
+      <pointLight position={[-3, 2, -2]} intensity={0.18} color="#a78bfa" distance={10} />
+      <spotLight
+        position={[0, 6, 2]}
+        angle={0.45}
+        penumbra={0.8}
+        intensity={0.35}
+        color="#b8e7ff"
+        castShadow={false}
+      />
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.35, -0.5]}>
-        <planeGeometry args={[36, 36]} />
-        <meshBasicMaterial ref={floorMat} map={gridTex} transparent opacity={0.34} />
+      {/* FG floor */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.55, 0]}>
+        <planeGeometry args={[48, 48]} />
+        <meshBasicMaterial ref={floorMat} map={floorTex} transparent opacity={0.4} />
       </mesh>
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.34, 0.3]}>
-        <circleGeometry args={[2.4, 64]} />
-        <meshBasicMaterial color="#071420" transparent opacity={0.4} depthWrite={false} />
+      {/* Soft stage disc under Jarvis */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.54, 0.2]}>
+        <circleGeometry args={[3.6, 64]} />
+        <meshBasicMaterial color="#081422" transparent opacity={0.55} depthWrite={false} />
       </mesh>
 
-      <mesh position={[0, 1.4, -8]}>
-        <planeGeometry args={[30, 10]} />
-        <meshBasicMaterial color="#040a12" transparent opacity={0.92} />
+      {/* MG / BG wall planes for chamber enclosure */}
+      <mesh position={[0, 1.6, -12]}>
+        <planeGeometry args={[40, 14]} />
+        <meshBasicMaterial color="#060a12" transparent opacity={0.95} />
+      </mesh>
+      <mesh position={[-10, 1.2, -4]} rotation={[0, Math.PI / 2.6, 0]}>
+        <planeGeometry args={[16, 10]} />
+        <meshBasicMaterial color="#050910" transparent opacity={0.55} />
+      </mesh>
+      <mesh position={[10, 1.2, -4]} rotation={[0, -Math.PI / 2.6, 0]}>
+        <planeGeometry args={[16, 10]} />
+        <meshBasicMaterial color="#050910" transparent opacity={0.55} />
+      </mesh>
+
+      {/* Light shafts */}
+      <mesh position={[-0.6, 2.2, -1.5]} rotation={[0.2, 0.15, 0.05]}>
+        <planeGeometry args={[0.28, 5.5]} />
+        <meshBasicMaterial
+          color="#7dd3fc"
+          transparent
+          opacity={0.028}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
       </mesh>
     </group>
   );
 }
 
-export function RoomDust({ reducedMotion }: { reducedMotion: boolean }) {
+export function RoomDust({
+  reducedMotion,
+  density = 1,
+}: {
+  reducedMotion: boolean;
+  density?: number;
+}) {
   const ref = useRef<THREE.Points>(null);
   const positions = useMemo(() => {
-    const count = 48;
+    const count = Math.floor(70 * density);
     const pos = new Float32Array(count * 3);
-    let seed = 17;
+    let seed = 19;
     const rnd = () => {
       seed = (seed * 16807) % 2147483647;
       return (seed - 1) / 2147483646;
     };
     for (let i = 0; i < count; i++) {
-      pos[i * 3] = (rnd() - 0.5) * 8;
-      pos[i * 3 + 1] = rnd() * 2.4 - 0.2;
-      pos[i * 3 + 2] = -rnd() * 5 + 0.5;
+      pos[i * 3] = (rnd() - 0.5) * 12;
+      pos[i * 3 + 1] = rnd() * 3.5 - 0.4;
+      pos[i * 3 + 2] = -rnd() * 8 + 1;
     }
     return pos;
-  }, []);
+  }, [density]);
 
   useFrame((_, dt) => {
     if (!ref.current || reducedMotion) return;
-    ref.current.rotation.y += dt * 0.004;
+    ref.current.rotation.y += dt * 0.003;
   });
 
   return (
@@ -99,10 +141,10 @@ export function RoomDust({ reducedMotion }: { reducedMotion: boolean }) {
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
       <pointsMaterial
-        size={0.009}
+        size={0.01}
         color="#8ecae6"
         transparent
-        opacity={0.18}
+        opacity={0.2}
         depthWrite={false}
         sizeAttenuation
       />

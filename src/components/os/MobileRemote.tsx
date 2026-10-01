@@ -1,183 +1,154 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useJarvis } from "@/components/jarvis/JarvisProvider";
+import { JarvisCore2D } from "@/components/os/JarvisCore2D";
+import { AskJarvisBar } from "@/components/os/AskJarvisBar";
+import { AttentionDot } from "@/components/os/AttentionDot";
 import { AttentionBoard } from "@/components/os/AttentionBoard";
 import { SystemActivity } from "@/components/os/SystemActivity";
 import { ApprovalCenter } from "@/components/jarvis/ApprovalCenter";
 import { SYSTEM_ORBIT, systemStatusLabel } from "@/lib/registry/projects";
-import { visualStateLabel } from "@/lib/jarvis/visualState";
 import type { ActivityEvent } from "@/types";
 
-const TABS = [
-  { id: "ask", label: "Ask" },
-  { id: "attention", label: "Attention" },
-  { id: "systems", label: "Systems" },
-  { id: "activity", label: "Activity" },
-  { id: "approvals", label: "Approvals" },
-] as const;
+type Sheet = "none" | "menu" | "attention" | "systems" | "activity" | "approvals";
 
-/** Practical mobile remote — simplified Jarvis, no full cinematic desktop */
+/**
+ * Cinematic mobile first impression — Jarvis owns the screen.
+ * Tabs / forms / debug chrome are contextual, not permanent.
+ */
 export function MobileRemote({ activitySeed }: { activitySeed: ActivityEvent[] }) {
-  const {
-    mobileTab,
-    setMobileTab,
-    setFocus,
-    submit,
-    busy,
-    visualState,
-    listening,
-    startListening,
-    stopListening,
-    voiceInputAvailable,
-    voiceError,
-    transcript,
-    voiceMuted,
-    setVoiceMuted,
-  } = useJarvis();
-  const [input, setInput] = useState("");
+  const { setFocus, setContextPanel } = useJarvis();
+  const [sheet, setSheet] = useState<Sheet>("none");
+  const [coreSize, setCoreSize] = useState(300);
+
+  useEffect(() => {
+    const update = () => setCoreSize(Math.min(360, Math.floor(window.innerWidth * 0.82)));
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   return (
-    <div className="lg:hidden">
-      <header className="mb-3 text-center">
-        <h1 className="display-font text-xs tracking-[0.22em] text-[var(--electric)]">
-          MARSHALL // OS
-        </h1>
-        <p className="mt-1 text-sm text-[var(--text)]">What can I do for you?</p>
-        <div className="mx-auto mt-3 flex h-24 w-24 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[rgba(8,20,36,0.8)]">
-          <div
-            className="h-14 w-14 rounded-full border border-[var(--cyan)]"
-            style={{
-              boxShadow: `0 0 24px ${
-                visualState === "WAITING_APPROVAL"
-                  ? "rgba(251,191,36,0.35)"
-                  : "rgba(125,211,252,0.25)"
-              }`,
-              opacity: visualState === "IDLE" ? 0.55 : 0.95,
-            }}
-            aria-hidden
-          />
+    <div className="lg:hidden mobile-cinematic">
+      <div className="mobile-hero">
+        <div className="mobile-hero-top">
+          <p className="hero-brand">Marshall // OS</p>
+          <div className="mobile-hero-actions">
+            <AttentionDot />
+            <button
+              type="button"
+              className="ghost-menu-btn"
+              aria-label="Open menu"
+              onClick={() => setSheet(sheet === "menu" ? "none" : "menu")}
+            >
+              ···
+            </button>
+          </div>
         </div>
-        <p className="mt-2 mono text-[10px] text-[var(--text-muted)]">
-          JARVIS · {visualStateLabel(visualState)} · DEMO
-        </p>
-      </header>
 
-      <div className="glass sticky top-[52px] z-30 mb-3 flex gap-1 overflow-x-auto p-2">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={`shrink-0 px-3 py-1.5 text-xs ${
-              mobileTab === t.id
-                ? "border border-[var(--border-strong)] text-[var(--electric)]"
-                : "text-[var(--text-muted)]"
-            }`}
-            onClick={() => setMobileTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
+        <div className="mobile-core-wrap">
+          <JarvisCore2D size={coreSize} />
+        </div>
+
+        <div className="mobile-ask-wrap">
+          <AskJarvisBar cinematic showPrompt />
+        </div>
       </div>
 
-      {mobileTab === "ask" && (
-        <section className="glass p-4">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const v = input.trim();
-              if (!v) return;
-              setInput("");
-              void submit(v);
-            }}
-          >
-            <input
-              className="input-command"
-              value={listening && transcript ? transcript : input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask Jarvis…"
-              disabled={busy || listening}
-              aria-label="Ask Jarvis"
-            />
-            <div className="mt-2 flex flex-wrap gap-2">
+      {sheet === "menu" && (
+        <div className="mobile-sheet" role="dialog" aria-label="More">
+          <div className="mobile-sheet-head">
+            <span>More</span>
+            <button type="button" className="ask-text-btn" onClick={() => setSheet("none")}>
+              Close
+            </button>
+          </div>
+          <div className="mobile-sheet-list">
+            {(
+              [
+                ["attention", "Attention"],
+                ["systems", "Systems"],
+                ["activity", "Activity"],
+                ["approvals", "Approvals"],
+              ] as const
+            ).map(([id, label]) => (
               <button
+                key={id}
                 type="button"
-                className={`mic-btn ${listening ? "mic-btn-live" : ""}`}
-                aria-label={listening ? "Stop listening" : "Start voice input"}
-                aria-pressed={listening}
-                disabled={!voiceInputAvailable}
+                className="mobile-sheet-item"
                 onClick={() => {
-                  if (listening) stopListening();
-                  else void startListening();
+                  setSheet(id);
+                  if (id === "approvals") setContextPanel("approvals");
                 }}
               >
-                Mic
-              </button>
-              <button type="submit" className="btn-primary" disabled={busy}>
-                Ask
-              </button>
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={() => setVoiceMuted(!voiceMuted)}
-              >
-                {voiceMuted ? "Unmute" : "Mute"}
-              </button>
-            </div>
-          </form>
-          {!voiceInputAvailable && (
-            <p className="mt-2 mono text-[10px] text-[var(--warn)]">
-              VOICE INPUT NOT AVAILABLE
-            </p>
-          )}
-          {voiceError && (
-            <p className="mt-2 mono text-[10px] text-[var(--warn)]">{voiceError}</p>
-          )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            {["What needs my attention?", "Check QuantLab performance"].map((s) => (
-              <button
-                key={s}
-                type="button"
-                className="chip"
-                disabled={busy}
-                onClick={() => void submit(s)}
-              >
-                {s}
+                {label}
               </button>
             ))}
           </div>
-        </section>
+        </div>
       )}
-      {mobileTab === "attention" && <AttentionBoard />}
-      {mobileTab === "systems" && (
-        <section className="glass p-4">
-          <h2 className="display-font text-[11px] text-[var(--electric)]">SYSTEMS</h2>
-          <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Mobile remote — tap for context (no full 3D).
-          </p>
-          <ul className="mt-3 space-y-2">
+
+      {sheet === "attention" && (
+        <SheetFrame title="Attention" onClose={() => setSheet("none")}>
+          <AttentionBoard />
+        </SheetFrame>
+      )}
+      {sheet === "activity" && (
+        <SheetFrame title="Activity" onClose={() => setSheet("none")}>
+          <SystemActivity seed={activitySeed} />
+        </SheetFrame>
+      )}
+      {sheet === "approvals" && (
+        <SheetFrame title="Approvals" onClose={() => setSheet("none")}>
+          <ApprovalCenter />
+        </SheetFrame>
+      )}
+      {sheet === "systems" && (
+        <SheetFrame title="Systems" onClose={() => setSheet("none")}>
+          <ul className="space-y-2 p-2">
             {SYSTEM_ORBIT.map((s) => (
               <li key={s.id}>
                 <button
                   type="button"
-                  className="flex w-full items-center justify-between border border-[var(--border)] px-3 py-2 text-left"
-                  onClick={() => setFocus({ kind: "system", id: s.id })}
+                  className="mobile-sheet-item w-full text-left"
+                  onClick={() => {
+                    setFocus({ kind: "system", id: s.id });
+                    setSheet("none");
+                  }}
                 >
-                  <span>
-                    <span className="text-sm">{s.label}</span>
-                    <span className="ml-2 mono text-[10px] text-[var(--text-muted)]">
-                      {s.category}
-                    </span>
+                  <span>{s.label}</span>
+                  <span className="mono text-[10px] text-[var(--text-muted)]">
+                    {systemStatusLabel(s.status)}
                   </span>
-                  <span className="mono text-[10px]">{systemStatusLabel(s.status)}</span>
                 </button>
               </li>
             ))}
           </ul>
-        </section>
+        </SheetFrame>
       )}
-      {mobileTab === "activity" && <SystemActivity seed={activitySeed} />}
-      {mobileTab === "approvals" && <ApprovalCenter />}
+    </div>
+  );
+}
+
+function SheetFrame({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mobile-sheet" role="dialog" aria-label={title}>
+      <div className="mobile-sheet-head">
+        <span>{title}</span>
+        <button type="button" className="ask-text-btn" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div className="mobile-sheet-body">{children}</div>
     </div>
   );
 }

@@ -15,8 +15,10 @@ import { DEMO_ACTIVITY, DEMO_PENDING_APPROVALS } from "@/lib/demo/fixtures";
 import {
   deriveJarvisVisualState,
   type JarvisVisualState,
+  type PresenceMode,
 } from "@/lib/jarvis/visualState";
 import { jarvisMotionClock } from "@/lib/jarvis/motionClock";
+import { jarvisExperienceClock } from "@/lib/jarvis/experienceClock";
 import { createBrowserSttAdapter } from "@/lib/voice/speechRecognition";
 import {
   createBrowserTtsAdapter,
@@ -81,6 +83,10 @@ type JarvisContextValue = {
   showAttention: () => void;
   speak: (text: string) => Promise<void>;
   wakeWordEnabled: false;
+  presence: PresenceMode;
+  transformProgress: number;
+  beginTransform: () => void;
+  returnToCore: () => void;
 };
 
 const JarvisContext = createContext<JarvisContextValue | null>(null);
@@ -138,6 +144,8 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
   const [audioLevel, setAudioLevel] = useState(0);
   const [voiceInputAvailable, setVoiceInputAvailable] = useState(false);
   const [voiceOutputAvailable, setVoiceOutputAvailable] = useState(false);
+  const [presence, setPresence] = useState<PresenceMode>("core");
+  const [transformProgress, setTransformProgress] = useState(0);
 
   const sttRef = useRef<ReturnType<typeof createBrowserSttAdapter> | null>(null);
   const ttsRef = useRef<ReturnType<typeof createBrowserTtsAdapter> | null>(null);
@@ -152,11 +160,22 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
 
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     jarvisMotionClock.setReducedMotion(reduced);
+    jarvisExperienceClock.setReducedMotion(reduced);
+
+    const unsub = jarvisExperienceClock.subscribe((phase, progress) => {
+      setTransformProgress(progress);
+      if (phase === "transform") setPresence("transforming");
+      else if (phase === "humanoid") setPresence("humanoid");
+      else if (phase === "return") setPresence("returning");
+      else if (phase === "idle") setPresence("core");
+    });
 
     return () => {
+      unsub();
       sttRef.current?.abort();
       ttsRef.current?.stop();
       jarvisMotionClock.interrupt("idle");
+      jarvisExperienceClock.interrupt("idle");
     };
   }, []);
 
@@ -192,6 +211,36 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const beginTransform = useCallback(() => {
+    setPresence((p) => {
+      if (p === "humanoid" || p === "transforming") return p;
+      return "transforming";
+    });
+  }, []);
+
+  const returnToCore = useCallback(() => {
+    setPresence((p) => {
+      if (p === "core" || p === "returning") return p;
+      return "returning";
+    });
+  }, []);
+
+  // Drive experience clock from presence transitions
+  useEffect(() => {
+    if (presence === "transforming" && jarvisExperienceClock.getPhase() !== "transform") {
+      jarvisExperienceClock.beginTransform(() => {
+        setPresence("humanoid");
+        void speak("Presence online.");
+      });
+    }
+    if (presence === "returning" && jarvisExperienceClock.getPhase() !== "return") {
+      jarvisExperienceClock.beginReturn(() => {
+        setPresence("core");
+        setTransformProgress(0);
+      });
+    }
+  }, [presence, speak]);
+
   const refresh = useCallback(async () => {
     const [j, a] = await Promise.all([
       fetch("/api/jarvis").then((r) => r.json()),
@@ -206,6 +255,25 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     async (input: string) => {
       const trimmed = input.trim();
       if (!trimmed) return null;
+      const lower = trimmed.toLowerCase();
+
+      // Local presence choreography — not a server command
+      if (
+        /transform into human|become human|human form|show yourself|appear as/.test(
+          lower,
+        )
+      ) {
+        beginTransform();
+        return null;
+      }
+      if (
+        /return to core|dismiss presence|back to core|return to jarvis core/.test(lower) &&
+        presence !== "core"
+      ) {
+        returnToCore();
+        return null;
+      }
+
       setBusy(true);
       setAwake(true);
       setVoiceError(null);
@@ -246,8 +314,6 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
           void speak(jarvisPhraseFor("ack"));
         }
 
-        // Attention / activity queries open contextual panels
-        const lower = trimmed.toLowerCase();
         if (lower.includes("attention")) setContextPanel("attention");
         if (lower.includes("activity") || lower.includes("progress")) {
           setContextPanel("activity");
@@ -262,7 +328,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
         setBusy(false);
       }
     },
-    [speak],
+    [speak, beginTransform, returnToCore, presence],
   );
 
   const resolve = useCallback(
@@ -393,8 +459,19 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
         voiceAvailable: voiceInputAvailable,
         activeCommand,
         awake,
+        presence,
+        transformProgress,
       }),
-    [listening, speaking, busy, voiceInputAvailable, activeCommand, awake],
+    [
+      listening,
+      speaking,
+      busy,
+      voiceInputAvailable,
+      activeCommand,
+      awake,
+      presence,
+      transformProgress,
+    ],
   );
 
   // Keep motion clock in sync with approval settle when visual is WAITING_APPROVAL
@@ -443,6 +520,10 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       showAttention,
       speak,
       wakeWordEnabled: WAKE_WORD_CONFIG.enabled,
+      presence,
+      transformProgress,
+      beginTransform,
+      returnToCore,
     }),
     [
       commands,
@@ -475,6 +556,10 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       contextPanel,
       showAttention,
       speak,
+      presence,
+      transformProgress,
+      beginTransform,
+      returnToCore,
     ],
   );
 

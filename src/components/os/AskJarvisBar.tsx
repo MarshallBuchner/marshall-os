@@ -2,19 +2,14 @@
 
 import { useState } from "react";
 import { useJarvis } from "@/components/jarvis/JarvisProvider";
-import { visualStateLabel } from "@/lib/jarvis/visualState";
 
-const SUGGESTIONS = [
-  "What needs my attention?",
-  "Check QuantLab performance",
-  "Have Cursor investigate QuantLab's mobile dashboard.",
-];
+type Props = {
+  showPrompt?: boolean;
+  cinematic?: boolean;
+};
 
-/**
- * Primary Ask Jarvis surface — sits with the core + mic.
- * Subtle suggestions only; not a permanent command viz dashboard.
- */
-export function AskJarvisBar() {
+/** Elegant ask + mic. Presence commands available as quiet text actions. */
+export function AskJarvisBar({ showPrompt = true, cinematic = true }: Props) {
   const {
     submit,
     busy,
@@ -25,16 +20,14 @@ export function AskJarvisBar() {
     voiceError,
     transcript,
     visualState,
-    voiceMuted,
-    setVoiceMuted,
-    voiceOutputAvailable,
     setAwake,
-    setContextPanel,
     approvals,
     resolve,
+    presence,
+    beginTransform,
+    returnToCore,
   } = useJarvis();
   const [input, setInput] = useState("");
-
   const pending = approvals.filter((a) => a.status === "pending");
 
   async function onSend(value: string) {
@@ -45,37 +38,29 @@ export function AskJarvisBar() {
   }
 
   return (
-    <div className="ask-jarvis-bar relative z-20 mx-auto w-full max-w-2xl px-4">
-      <p className="mb-3 text-center text-lg text-[var(--text)] md:text-xl">
-        What can I do for you?
-      </p>
+    <div className={`ask-jarvis-bar ${cinematic ? "ask-jarvis-cinematic" : ""}`}>
+      {showPrompt && <p className="ask-prompt">What can I do for you?</p>}
 
       <form
-        className="flex items-stretch gap-2"
+        className="ask-form"
         onSubmit={(e) => {
           e.preventDefault();
           void onSend(input);
         }}
       >
-        <div className="relative flex-1">
-          <input
-            className="input-command pr-12"
-            value={listening && transcript ? transcript : input}
-            onChange={(e) => setInput(e.target.value)}
-            onFocus={() => setAwake(true)}
-            placeholder="Ask Jarvis…"
-            disabled={busy || listening}
-            aria-label="Ask Jarvis"
-          />
-          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 mono text-[9px] text-[var(--text-muted)]">
-            {visualStateLabel(visualState)}
-          </span>
-        </div>
-
+        <input
+          className="ask-input"
+          value={listening && transcript ? transcript : input}
+          onChange={(e) => setInput(e.target.value)}
+          onFocus={() => setAwake(true)}
+          placeholder="Ask Jarvis"
+          disabled={busy || listening || presence === "transforming" || presence === "returning"}
+          aria-label="Ask Jarvis"
+        />
         <button
           type="button"
-          className={`mic-btn ${listening ? "mic-btn-live" : ""} ${
-            !voiceInputAvailable ? "mic-btn-unavailable" : ""
+          className={`mic-orb ${listening ? "mic-orb-live" : ""} ${
+            !voiceInputAvailable ? "mic-orb-off" : ""
           }`}
           aria-label={
             !voiceInputAvailable
@@ -85,107 +70,68 @@ export function AskJarvisBar() {
                 : "Start voice input"
           }
           aria-pressed={listening}
-          title={
-            voiceInputAvailable
-              ? listening
-                ? "Stop listening"
-                : "Click to speak"
-              : "VOICE INPUT NOT AVAILABLE"
-          }
+          disabled={presence === "transforming" || presence === "returning"}
           onClick={() => {
-            if (!voiceInputAvailable) {
-              return;
-            }
+            if (!voiceInputAvailable) return;
             if (listening) stopListening();
             else void startListening();
           }}
         >
           <MicIcon />
         </button>
-
-        <button type="submit" className="btn-primary shrink-0" disabled={busy || listening}>
-          {busy ? "…" : "Ask"}
-        </button>
       </form>
 
       {voiceError && (
-        <p className="mt-2 text-center mono text-[10px] text-[var(--warn)]" role="status">
+        <p className="ask-status warn" role="status">
           {voiceError}
         </p>
       )}
       {listening && (
-        <p className="mt-2 text-center mono text-[10px] text-[var(--electric)]" role="status">
-          LISTENING · LOCAL BROWSER STT · click mic to stop
+        <p className="ask-status" role="status">
+          Listening
+        </p>
+      )}
+      {(presence === "transforming" || presence === "returning") && (
+        <p className="ask-status" role="status">
+          {presence === "transforming" ? "Transforming" : "Returning"}
         </p>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className="chip"
-            disabled={busy}
-            onClick={() => void onSend(s)}
-          >
-            {s}
+      <div className="ask-quiet-actions">
+        {presence === "core" && (
+          <button type="button" className="ask-text-btn" onClick={() => beginTransform()}>
+            Transform
           </button>
-        ))}
+        )}
+        {(presence === "humanoid" || presence === "transforming") && (
+          <button type="button" className="ask-text-btn" onClick={() => returnToCore()}>
+            Return to core
+          </button>
+        )}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
-        {voiceOutputAvailable && (
+      {visualState === "WAITING_APPROVAL" && pending.length === 1 && (
+        <div className="ask-approval-row">
           <button
             type="button"
-            className="btn-ghost"
-            aria-pressed={voiceMuted}
-            onClick={() => setVoiceMuted(!voiceMuted)}
+            className="ask-text-btn primary"
+            disabled={busy}
+            aria-label={`Approve ${pending[0].actionLabel}`}
+            onClick={() => void resolve(pending[0].id, "approved")}
           >
-            {voiceMuted ? "Unmute Jarvis" : "Mute Jarvis"}
+            Approve
           </button>
-        )}
-        <button
-          type="button"
-          className="btn-ghost"
-          onClick={() => setContextPanel("activity")}
-        >
-          Activity
-        </button>
-        {pending.length > 0 && (
           <button
             type="button"
-            className="btn-ghost text-[var(--warn)]"
-            onClick={() => setContextPanel("approvals")}
+            className="ask-text-btn"
+            disabled={busy}
+            aria-label={`Cancel ${pending[0].actionLabel}`}
+            onClick={() => void resolve(pending[0].id, "rejected")}
           >
-            Approvals ({pending.length})
+            Cancel
           </button>
-        )}
-        {visualState === "WAITING_APPROVAL" && pending.length === 1 && (
-          <>
-            <span className="mono text-[9px] text-[var(--text-muted)]">
-              Voice: say Approve or Cancel
-            </span>
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={busy}
-              aria-label={`Approve ${pending[0].actionLabel}`}
-              onClick={() => void resolve(pending[0].id, "approved")}
-            >
-              Approve
-            </button>
-            <button
-              type="button"
-              className="btn-danger"
-              disabled={busy}
-              aria-label={`Cancel ${pending[0].actionLabel}`}
-              onClick={() => void resolve(pending[0].id, "rejected")}
-            >
-              Cancel
-            </button>
-          </>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -27,7 +27,7 @@ export function ContextualDrawer({ activitySeed }: { activitySeed: ActivityEvent
 
   return (
     <aside
-      className="contextual-drawer glass-strong fixed bottom-0 right-0 top-[52px] z-40 flex w-full max-w-md flex-col overflow-y-auto border-l border-[var(--border)] shadow-2xl md:top-[56px]"
+      className="contextual-drawer glass-strong fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col overflow-y-auto border-l border-[var(--border)] shadow-2xl"
       aria-label={title}
     >
       <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">

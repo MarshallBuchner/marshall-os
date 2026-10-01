@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef } from "react";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import {
   visualAccent,
@@ -11,25 +11,33 @@ import {
 type Props = {
   state: JarvisVisualState;
   reducedMotion: boolean;
-  /** 0–1 mic level / waveform energy */
   audioLevel?: number;
+  awake?: boolean;
+  /** 0 = full core, 1 = fully dissolved into humanoid particles */
+  dissolve?: number;
 };
 
 /**
- * Original circular computational JARVIS — precision instrument aesthetic.
- * Concentric rings, segmented radials, ticks, arcs, layered translucency.
- * Not Marvel artwork. Not a glowing planet. Not a human bust.
+ * 14-layer engineered Jarvis core — density target vs circular reference.
+ * Distinct radii / Z / opacity / motion per layer. Not identical circles.
  */
 export function JarvisCircularCore({
   state,
   reducedMotion,
   audioLevel = 0,
+  awake = false,
+  dissolve = 0,
 }: Props) {
-  const group = useRef<THREE.Group>(null);
-  const ringGroup = useRef<THREE.Group>(null);
-  const arcRef = useRef<THREE.Mesh>(null);
-  const waveRef = useRef<THREE.Mesh>(null);
-  const particles = useRef<THREE.Points>(null);
+  const root = useRef<THREE.Group>(null);
+  const wake = useRef(0);
+  const wasAwake = useRef(false);
+  const spinA = useRef<THREE.Group>(null);
+  const spinB = useRef<THREE.Group>(null);
+  const spinC = useRef<THREE.Group>(null);
+  const wave = useRef<THREE.Mesh>(null);
+  const dots = useRef<THREE.Points>(null);
+  const nucleus = useRef<THREE.MeshPhysicalMaterial>(null);
+  const { pointer } = useThree();
 
   const accent = visualAccent(state);
   const primary = useMemo(() => new THREE.Color(accent.primary), [accent.primary]);
@@ -38,253 +46,329 @@ export function JarvisCircularCore({
     [accent.secondary],
   );
 
-  const tickPositions = useMemo(() => {
-    const positions: number[] = [];
-    const outer = 1.42;
-    for (let i = 0; i < 72; i++) {
-      const a = (i / 72) * Math.PI * 2;
-      const len = i % 6 === 0 ? 0.08 : 0.04;
-      positions.push(
-        Math.cos(a) * outer,
-        Math.sin(a) * outer,
-        0,
-        Math.cos(a) * (outer + len),
-        Math.sin(a) * (outer + len),
-        0,
-      );
-    }
-    return new Float32Array(positions);
-  }, []);
+  const tickGeo = useMemo(() => buildTicks(1.62, 120), []);
+  const capsuleGeo = useMemo(() => buildCapsules(1.28, 36), []);
+  const squareGeo = useMemo(() => buildSquares(1.48, 16), []);
+  const dotField = useMemo(() => buildDotRing(0.95, 80), []);
 
-  const segmentPositions = useMemo(() => {
-    const positions: number[] = [];
-    const r = 1.18;
-    for (let i = 0; i < 24; i++) {
-      if (i % 5 === 0) continue; // gaps — segmented band
-      const a0 = (i / 24) * Math.PI * 2;
-      const a1 = ((i + 0.7) / 24) * Math.PI * 2;
-      const steps = 6;
-      for (let s = 0; s < steps; s++) {
-        const t0 = a0 + ((a1 - a0) * s) / steps;
-        const t1 = a0 + ((a1 - a0) * (s + 1)) / steps;
-        positions.push(
-          Math.cos(t0) * r,
-          Math.sin(t0) * r,
-          0.01,
-          Math.cos(t1) * r,
-          Math.sin(t1) * r,
-          0.01,
-        );
-      }
-    }
-    return new Float32Array(positions);
-  }, []);
+  useFrame((st, dt) => {
+    if (awake && !wasAwake.current) wake.current = 1;
+    wasAwake.current = awake;
+    if (wake.current > 0) wake.current = Math.max(0, wake.current - dt * (reducedMotion ? 8 : 1.15));
 
-  const fieldPos = useMemo(() => {
-    const count = 120;
-    const pos = new Float32Array(count * 3);
-    let seed = 41;
-    const rnd = () => {
-      seed = (seed * 48271) % 2147483647;
-      return (seed - 1) / 2147483646;
-    };
-    for (let i = 0; i < count; i++) {
-      const a = rnd() * Math.PI * 2;
-      const r = 0.35 + rnd() * 1.1;
-      pos[i * 3] = Math.cos(a) * r;
-      pos[i * 3 + 1] = Math.sin(a) * r;
-      pos[i * 3 + 2] = (rnd() - 0.5) * 0.25;
-    }
-    return pos;
-  }, []);
+    const t = st.clock.elapsedTime;
+    const w = wake.current;
+    const audio = audioLevel;
+    const level = accent.intensity + w * 0.35;
+    const hide = THREE.MathUtils.clamp(dissolve, 0, 1);
+    const visibleCore = 1 - hide;
 
-  useFrame((clockState, dt) => {
-    const t = clockState.clock.elapsedTime;
-    const level = accent.intensity;
-    const pulse =
-      1 +
-      Math.sin(t * (1.2 + accent.pulse * 8)) * accent.pulse +
-      audioLevel * 0.08;
-
-    if (group.current && !reducedMotion) {
-      group.current.scale.setScalar(pulse);
-    }
-
-    if (ringGroup.current && !reducedMotion) {
-      ringGroup.current.rotation.z += dt * accent.spin;
-    }
-
-    if (arcRef.current) {
-      const mat = arcRef.current.material as THREE.MeshBasicMaterial;
-      mat.color.lerp(primary, 0.15);
-      mat.opacity = 0.15 + level * 0.45;
+    if (root.current) {
+      root.current.visible = visibleCore > 0.02;
+      const targetScale = (1 + w * 0.05 + (reducedMotion ? 0 : Math.sin(t * 0.65) * 0.01)) * (0.85 + visibleCore * 0.15);
+      root.current.scale.setScalar(THREE.MathUtils.lerp(root.current.scale.x || 1, targetScale, 0.08));
       if (!reducedMotion) {
-        arcRef.current.rotation.z = -t * (0.15 + accent.spin);
+        root.current.rotation.y = THREE.MathUtils.lerp(root.current.rotation.y, pointer.x * 0.14, 0.04);
+        root.current.rotation.x = THREE.MathUtils.lerp(root.current.rotation.x, -pointer.y * 0.1, 0.04);
       }
+      root.current.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          const m = (obj as THREE.Mesh).material as THREE.Material & { opacity?: number };
+          if (m && "opacity" in m && typeof m.userData.baseOpacity === "number") {
+            m.opacity = m.userData.baseOpacity * visibleCore;
+          }
+        }
+      });
     }
 
-    if (waveRef.current) {
-      const listening = state === "LISTENING" || state === "SPEAKING";
-      waveRef.current.visible = listening;
-      if (listening) {
-        const s = 1 + audioLevel * 0.35 + Math.sin(t * 6) * 0.03;
-        waveRef.current.scale.setScalar(s);
-        const mat = waveRef.current.material as THREE.MeshBasicMaterial;
-        mat.opacity = 0.2 + audioLevel * 0.35;
+    if (!reducedMotion) {
+      if (spinA.current) spinA.current.rotation.z += dt * (accent.spin * 0.4);
+      if (spinB.current) spinB.current.rotation.z -= dt * (accent.spin * 0.7 + (state === "UNDERSTANDING" ? 0.1 : 0));
+      if (spinC.current) spinC.current.rotation.z += dt * (accent.spin * 1.1);
+    }
+
+    if (wave.current) {
+      const live = state === "LISTENING" || state === "SPEAKING";
+      wave.current.visible = live && visibleCore > 0.2;
+      if (live) {
+        wave.current.scale.setScalar(1 + audio * 0.5 + Math.sin(t * 7) * 0.03);
+        const mat = wave.current.material as THREE.MeshBasicMaterial;
+        mat.opacity = (0.3 + audio * 0.45) * visibleCore;
         mat.color.lerp(state === "SPEAKING" ? secondary : primary, 0.2);
       }
     }
 
-    if (particles.current) {
-      const mat = particles.current.material as THREE.PointsMaterial;
-      mat.opacity = accent.particle * (0.5 + level * 0.5);
-      mat.size = 0.012 + level * 0.012;
+    if (dots.current) {
+      const mat = dots.current.material as THREE.PointsMaterial;
+      mat.opacity = (0.25 + level * 0.4) * visibleCore;
       mat.color.lerp(primary, 0.1);
-      if (!reducedMotion) {
-        particles.current.rotation.z += dt * 0.03;
-      }
+      if (!reducedMotion) dots.current.rotation.z -= dt * 0.04;
+    }
+
+    if (nucleus.current) {
+      nucleus.current.emissive.copy(primary);
+      nucleus.current.emissiveIntensity = (0.35 + level * 0.75 + audio * 0.35) * visibleCore;
+      nucleus.current.opacity = 0.9 * visibleCore;
     }
   });
 
   const isApproval = state === "WAITING_APPROVAL";
-  const discOpacity = 0.04 + accent.intensity * 0.08;
 
   return (
-    <group ref={group} position={[0, 0.15, 0]}>
-      {/* Soft depth disc */}
-      <mesh position={[0, 0, -0.08]}>
-        <circleGeometry args={[1.65, 64]} />
+    <group ref={root} position={[0, 0.1, 0]}>
+      {/* L1 ambient glow */}
+      <mesh position={[0, 0, -0.4]}>
+        <circleGeometry args={[2.55, 64]} />
         <meshBasicMaterial
-          color={isApproval ? "#1a1208" : "#061018"}
+          color={accent.primary}
           transparent
-          opacity={0.55}
+          opacity={0.12}
           depthWrite={false}
+          onUpdate={(m) => {
+            m.userData.baseOpacity = 0.12;
+          }}
         />
       </mesh>
 
-      {/* Inner luminous plate */}
-      <mesh position={[0, 0, -0.02]}>
-        <circleGeometry args={[0.55, 48]} />
+      {/* L2 depth halo */}
+      <mesh position={[0, 0, -0.25]}>
+        <ringGeometry args={[1.75, 2.15, 64]} />
         <meshBasicMaterial
-          color={accent.primary}
+          color="#0a1522"
           transparent
-          opacity={discOpacity}
-          depthWrite={false}
-        />
-      </mesh>
-
-      {/* Layered translucent rings */}
-      <group ref={ringGroup}>
-        {[0.72, 0.95, 1.22, 1.48].map((r, i) => (
-          <mesh key={r} position={[0, 0, i * 0.012]}>
-            <ringGeometry args={[r - 0.012, r, 96]} />
-            <meshBasicMaterial
-              color={i === 2 && isApproval ? accent.primary : i % 2 ? accent.secondary : accent.primary}
-              transparent
-              opacity={0.18 + accent.intensity * 0.25 - i * 0.02}
-              side={THREE.DoubleSide}
-              depthWrite={false}
-            />
-          </mesh>
-        ))}
-      </group>
-
-      {/* Segmented radial band */}
-      <lineSegments>
-        <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[segmentPositions, 3]} />
-        </bufferGeometry>
-        <lineBasicMaterial
-          color={accent.primary}
-          transparent
-          opacity={0.35 + accent.intensity * 0.3}
-        />
-      </lineSegments>
-
-      {/* Fine tick marks */}
-      <lineSegments>
-        <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[tickPositions, 3]} />
-        </bufferGeometry>
-        <lineBasicMaterial color="#e8f1ff" transparent opacity={0.22 + accent.intensity * 0.15} />
-      </lineSegments>
-
-      {/* Procedural arc — data band */}
-      <mesh ref={arcRef} position={[0, 0, 0.03]}>
-        <ringGeometry args={[1.3, 1.34, 64, 1, 0, Math.PI * 1.2]} />
-        <meshBasicMaterial
-          color={accent.primary}
-          transparent
-          opacity={0.35}
+          opacity={0.5}
           side={THREE.DoubleSide}
           depthWrite={false}
+          onUpdate={(m) => {
+            m.userData.baseOpacity = 0.5;
+          }}
         />
       </mesh>
 
-      {/* Secondary violet accent arc — occasional, restrained */}
-      <mesh position={[0, 0, 0.04]} rotation={[0, 0, Math.PI * 0.6]}>
-        <ringGeometry args={[1.05, 1.07, 48, 1, 0, Math.PI * 0.45]} />
+      {/* L3 outer ticks */}
+      <lineSegments geometry={tickGeo}>
+        <lineBasicMaterial color="#e8f1ff" transparent opacity={0.32} />
+      </lineSegments>
+
+      {/* L4 outer structural */}
+      <group ref={spinA}>
+        <Ring r={1.58} w={0.016} z={-0.08} color={accent.primary} opacity={0.35} />
+        <Ring r={1.46} w={0.012} z={-0.05} color={accent.primary} opacity={0.28} />
+      </group>
+
+      {/* L5 square accents */}
+      <lineSegments geometry={squareGeo}>
+        <lineBasicMaterial color={accent.primary} transparent opacity={0.4} />
+      </lineSegments>
+
+      {/* L6 segmented / capsule band */}
+      <group ref={spinB}>
+        <lineSegments geometry={capsuleGeo}>
+          <lineBasicMaterial color={accent.primary} transparent opacity={0.55} />
+        </lineSegments>
+      </group>
+
+      {/* L7 mid procedural arc */}
+      <group ref={spinC}>
+        <mesh position={[0, 0, 0.05]}>
+          <ringGeometry args={[1.12, 1.18, 64, 1, 0, Math.PI * 1.4]} />
+          <meshBasicMaterial
+            color={isApproval ? accent.primary : accent.primary}
+            transparent
+            opacity={0.55}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+            onUpdate={(m) => {
+              m.userData.baseOpacity = 0.55;
+            }}
+          />
+        </mesh>
+      </group>
+
+      {/* L8 violet accent */}
+      <mesh position={[0, 0, 0.06]} rotation={[0, 0, 0.9]}>
+        <ringGeometry args={[1.0, 1.04, 48, 1, 0, Math.PI * 0.55]} />
         <meshBasicMaterial
           color="#a78bfa"
           transparent
-          opacity={0.12 + accent.intensity * 0.15}
+          opacity={0.22}
           side={THREE.DoubleSide}
           depthWrite={false}
+          onUpdate={(m) => {
+            m.userData.baseOpacity = 0.22;
+          }}
         />
       </mesh>
 
-      {/* Listening / speaking waveform ring */}
-      <mesh ref={waveRef} visible={false} position={[0, 0, 0.05]}>
-        <ringGeometry args={[0.62, 0.68, 64]} />
-        <meshBasicMaterial
-          color={accent.primary}
-          transparent
-          opacity={0.3}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
-      </mesh>
-
-      {/* Core nucleus — translucent computational field, not a logo sphere */}
-      <mesh>
-        <sphereGeometry args={[0.22, 32, 32]} />
-        <meshPhysicalMaterial
-          color="#0a1622"
-          emissive={accent.primary}
-          emissiveIntensity={0.25 + accent.intensity * 0.55}
-          roughness={0.25}
-          metalness={0.15}
-          transmission={0.45}
-          thickness={0.4}
-          transparent
-          opacity={0.85}
-        />
-      </mesh>
-
-      {/* Inner crosshair — precision instrument cue */}
-      <mesh rotation={[0, 0, Math.PI / 4]}>
-        <ringGeometry args={[0.28, 0.295, 4]} />
-        <meshBasicMaterial
-          color="#e8f1ff"
-          transparent
-          opacity={0.15 + accent.intensity * 0.2}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
-
-      <points ref={particles}>
+      {/* L9 dotted data ring */}
+      <points ref={dots}>
         <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[fieldPos, 3]} />
+          <bufferAttribute attach="attributes-position" args={[dotField, 3]} />
         </bufferGeometry>
-        <pointsMaterial
-          size={0.014}
+        <pointsMaterial size={0.018} color={accent.primary} transparent opacity={0.4} sizeAttenuation depthWrite={false} />
+      </points>
+
+      {/* L10 inner luminous */}
+      <Ring r={0.78} w={0.02} z={0.02} color={accent.primary} opacity={0.5} />
+      <Ring r={0.62} w={0.014} z={0.03} color={accent.secondary} opacity={0.35} />
+
+      {/* L11 waveform */}
+      <mesh ref={wave} visible={false} position={[0, 0, 0.08]}>
+        <ringGeometry args={[0.48, 0.56, 64]} />
+        <meshBasicMaterial color={accent.primary} transparent opacity={0.35} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+
+      {/* L12 nucleus wash */}
+      <mesh position={[0, 0, -0.02]}>
+        <circleGeometry args={[0.42, 48]} />
+        <meshBasicMaterial
           color={accent.primary}
           transparent
-          opacity={0.2}
+          opacity={0.08}
           depthWrite={false}
-          sizeAttenuation
+          onUpdate={(m) => {
+            m.userData.baseOpacity = 0.08;
+          }}
         />
-      </points>
+      </mesh>
+
+      {/* L13 nucleus */}
+      <mesh>
+        <sphereGeometry args={[0.24, 48, 48]} />
+        <meshPhysicalMaterial
+          ref={nucleus}
+          color="#071420"
+          emissive={accent.primary}
+          emissiveIntensity={0.5}
+          roughness={0.18}
+          metalness={0.15}
+          transmission={0.5}
+          thickness={0.45}
+          transparent
+          opacity={0.9}
+        />
+      </mesh>
+
+      {/* L14 precision diamond */}
+      <mesh rotation={[0, 0, Math.PI / 4]}>
+        <ringGeometry args={[0.3, 0.318, 4]} />
+        <meshBasicMaterial
+          color="#f0f7ff"
+          transparent
+          opacity={0.28}
+          side={THREE.DoubleSide}
+          onUpdate={(m) => {
+            m.userData.baseOpacity = 0.28;
+          }}
+        />
+      </mesh>
     </group>
   );
+}
+
+function Ring({
+  r,
+  w,
+  z,
+  color,
+  opacity,
+}: {
+  r: number;
+  w: number;
+  z: number;
+  color: string;
+  opacity: number;
+}) {
+  return (
+    <mesh position={[0, 0, z]}>
+      <ringGeometry args={[r - w, r, 96]} />
+      <meshBasicMaterial
+        color={color}
+        transparent
+        opacity={opacity}
+        side={THREE.DoubleSide}
+        depthWrite={false}
+        onUpdate={(m) => {
+          m.userData.baseOpacity = opacity;
+        }}
+      />
+    </mesh>
+  );
+}
+
+function buildTicks(radius: number, count: number) {
+  const pos: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2;
+    const len = i % 10 === 0 ? 0.11 : i % 2 === 0 ? 0.06 : 0.03;
+    pos.push(
+      Math.cos(a) * radius,
+      Math.sin(a) * radius,
+      0.02,
+      Math.cos(a) * (radius + len),
+      Math.sin(a) * (radius + len),
+      0.02,
+    );
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  return geo;
+}
+
+function buildCapsules(radius: number, count: number) {
+  const pos: number[] = [];
+  for (let i = 0; i < count; i++) {
+    if (i % 5 === 0) continue;
+    const a0 = (i / count) * Math.PI * 2;
+    const a1 = a0 + (0.55 / count) * Math.PI * 2;
+    for (let s = 0; s < 4; s++) {
+      const t0 = a0 + ((a1 - a0) * s) / 4;
+      const t1 = a0 + ((a1 - a0) * (s + 1)) / 4;
+      pos.push(
+        Math.cos(t0) * radius,
+        Math.sin(t0) * radius,
+        0.04,
+        Math.cos(t1) * radius,
+        Math.sin(t1) * radius,
+        0.04,
+      );
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  return geo;
+}
+
+function buildSquares(radius: number, count: number) {
+  const pos: number[] = [];
+  const s = 0.035;
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2;
+    const cx = Math.cos(a) * radius;
+    const cy = Math.sin(a) * radius;
+    const corners: [number, number][] = [
+      [-s, -s],
+      [s, -s],
+      [s, s],
+      [-s, s],
+      [-s, -s],
+    ];
+    for (let k = 0; k < 4; k++) {
+      pos.push(cx + corners[k][0], cy + corners[k][1], 0.03, cx + corners[k + 1][0], cy + corners[k + 1][1], 0.03);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  return geo;
+}
+
+function buildDotRing(radius: number, count: number) {
+  const pos = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2;
+    pos[i * 3] = Math.cos(a) * radius;
+    pos[i * 3 + 1] = Math.sin(a) * radius;
+    pos[i * 3 + 2] = 0.05;
+  }
+  return pos;
 }
