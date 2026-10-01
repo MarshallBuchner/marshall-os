@@ -26,6 +26,7 @@ export function AskJarvisBar({ showPrompt = true, cinematic = true }: Props) {
     presence,
     beginTransform,
     returnToCore,
+    presenceDiagnostic,
   } = useJarvis();
   const [input, setInput] = useState("");
   const pending = approvals.filter((a) => a.status === "pending");
@@ -94,6 +95,16 @@ export function AskJarvisBar({ showPrompt = true, cinematic = true }: Props) {
       {(presence === "transforming" || presence === "returning") && (
         <p className="ask-status" role="status">
           {presence === "transforming" ? "Transforming" : "Returning"}
+        </p>
+      )}
+      {presence === "humanoid" && (
+        <p className="ask-status" role="status">
+          Presence online
+        </p>
+      )}
+      {presenceDiagnostic && (
+        <p className="ask-status warn" role="status">
+          {presenceDiagnostic}
         </p>
       )}
 

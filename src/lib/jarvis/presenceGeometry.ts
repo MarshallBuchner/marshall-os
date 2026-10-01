@@ -13,12 +13,13 @@ function makeRnd(seed0: number) {
 
 /** Sample points on concentric core rings (engineered density) */
 export function buildCoreTargets(count: number): Float32Array {
-  const out = new Float32Array(count * 3);
+  const n = Math.max(1, count | 0);
+  const out = new Float32Array(n * 3);
   const rnd = makeRnd(91);
   const rings = [0.35, 0.55, 0.72, 0.9, 1.08, 1.25, 1.42];
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < n; i++) {
     const ring = rings[i % rings.length];
-    const a = (i / count) * Math.PI * 2 + rnd() * 0.2;
+    const a = (i / n) * Math.PI * 2 + rnd() * 0.2;
     const jitter = (rnd() - 0.5) * 0.06;
     const r = ring + jitter;
     out[i * 3] = Math.cos(a) * r;
@@ -33,10 +34,11 @@ export function buildCoreTargets(count: number): Float32Array {
  * Featureless — eyes reserved as last indices.
  */
 export function buildHumanoidTargets(count: number): Float32Array {
-  const out = new Float32Array(count * 3);
+  const n = Math.max(48, count | 0); // need room for eye cluster
+  const out = new Float32Array(n * 3);
   const rnd = makeRnd(113);
-  const eyeCount = 24;
-  const bodyCount = count - eyeCount;
+  const eyeCount = Math.min(24, Math.floor(n / 8));
+  const bodyCount = n - eyeCount;
 
   for (let i = 0; i < bodyCount; i++) {
     const u = rnd();
@@ -62,20 +64,24 @@ export function buildHumanoidTargets(count: number): Float32Array {
       y = -0.05 + rnd() * 0.35;
       z = Math.sin(a) * r * 0.45 - 0.05;
     }
-    out[i * 3] = x;
-    out[i * 3 + 1] = y;
-    out[i * 3 + 2] = z;
+    out[i * 3] = finite(x);
+    out[i * 3 + 1] = finite(y);
+    out[i * 3 + 2] = finite(z);
   }
 
   for (let e = 0; e < eyeCount; e++) {
     const i = bodyCount + e;
     const left = e < eyeCount / 2;
-    out[i * 3] = (left ? -0.12 : 0.12) + (rnd() - 0.5) * 0.03;
-    out[i * 3 + 1] = 0.95 + (rnd() - 0.5) * 0.04;
-    out[i * 3 + 2] = 0.28 + (rnd() - 0.5) * 0.02;
+    out[i * 3] = finite((left ? -0.12 : 0.12) + (rnd() - 0.5) * 0.03);
+    out[i * 3 + 1] = finite(0.95 + (rnd() - 0.5) * 0.04);
+    out[i * 3 + 2] = finite(0.28 + (rnd() - 0.5) * 0.02);
   }
 
   return out;
+}
+
+function finite(v: number) {
+  return Number.isFinite(v) ? v : 0;
 }
 
 export function lerpArrays(

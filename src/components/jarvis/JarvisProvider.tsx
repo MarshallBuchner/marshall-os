@@ -87,6 +87,8 @@ type JarvisContextValue = {
   transformProgress: number;
   beginTransform: () => void;
   returnToCore: () => void;
+  /** Soft non-blocking note when presence construction fails */
+  presenceDiagnostic: string | null;
 };
 
 const JarvisContext = createContext<JarvisContextValue | null>(null);
@@ -146,6 +148,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
   const [voiceOutputAvailable, setVoiceOutputAvailable] = useState(false);
   const [presence, setPresence] = useState<PresenceMode>("core");
   const [transformProgress, setTransformProgress] = useState(0);
+  const [presenceDiagnostic, setPresenceDiagnostic] = useState<string | null>(null);
 
   const sttRef = useRef<ReturnType<typeof createBrowserSttAdapter> | null>(null);
   const ttsRef = useRef<ReturnType<typeof createBrowserTtsAdapter> | null>(null);
@@ -212,6 +215,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const beginTransform = useCallback(() => {
+    setPresenceDiagnostic(null);
     setPresence((p) => {
       if (p === "humanoid" || p === "transforming") return p;
       return "transforming";
@@ -230,6 +234,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     if (presence === "transforming" && jarvisExperienceClock.getPhase() !== "transform") {
       jarvisExperienceClock.beginTransform(() => {
         setPresence("humanoid");
+        setPresenceDiagnostic(null);
         void speak("Presence online.");
       });
     }
@@ -240,6 +245,36 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       });
     }
   }, [presence, speak]);
+
+  // Bounded fail-safe: never leave TRANSFORMING indefinitely (iOS rAF stalls, remount races)
+  useEffect(() => {
+    if (presence !== "transforming" && presence !== "returning") return;
+    const ms = presence === "transforming" ? 6500 : 5500;
+    const id = window.setTimeout(() => {
+      const phase = jarvisExperienceClock.getPhase();
+      if (presence === "transforming" && (phase === "transform" || phase === "humanoid")) {
+        // Clock may have completed visually but React state lagged — force settle
+        if (phase === "humanoid") {
+          setPresence("humanoid");
+          setTransformProgress(1);
+          setPresenceDiagnostic(null);
+          return;
+        }
+        jarvisExperienceClock.interrupt("idle");
+        setPresence("core");
+        setTransformProgress(0);
+        setPresenceDiagnostic("Presence construction timed out — returned to core.");
+        return;
+      }
+      if (presence === "returning" && phase === "return") {
+        jarvisExperienceClock.interrupt("idle");
+        setPresence("core");
+        setTransformProgress(0);
+        setPresenceDiagnostic("Return timed out — restored core.");
+      }
+    }, ms);
+    return () => window.clearTimeout(id);
+  }, [presence]);
 
   const refresh = useCallback(async () => {
     const [j, a] = await Promise.all([
@@ -524,6 +559,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       transformProgress,
       beginTransform,
       returnToCore,
+      presenceDiagnostic,
     }),
     [
       commands,
@@ -560,6 +596,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       transformProgress,
       beginTransform,
       returnToCore,
+      presenceDiagnostic,
     ],
   );
 

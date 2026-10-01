@@ -28,6 +28,8 @@ export class ExperienceClock {
   private raf: number | null = null;
   private listeners = new Set<Listener>();
   private reducedMotion = false;
+  /** Prevents double-fire from rAF completion + timeout backup */
+  private settleToken = 0;
 
   setReducedMotion(v: boolean) {
     this.reducedMotion = v;
@@ -63,6 +65,7 @@ export class ExperienceClock {
 
   interrupt(phase: ExperiencePhase = "idle") {
     this.generation += 1;
+    this.settleToken += 1;
     this.clear();
     this.phase = phase;
     this.progress = phase === "idle" ? 0 : this.progress;
@@ -79,8 +82,16 @@ export class ExperienceClock {
     this.timers.push(id);
   }
 
-  /** Animate progress 0→1 over durationMs while in phase */
-  private animateProgress(gen: number, durationMs: number, phase: ExperiencePhase) {
+  /**
+   * Animate progress 0→1 over durationMs while in phase.
+   * Invokes onComplete exactly once when progress reaches 1 (rAF path).
+   */
+  private animateProgress(
+    gen: number,
+    durationMs: number,
+    phase: ExperiencePhase,
+    onComplete?: () => void,
+  ) {
     this.phase = phase;
     this.progress = 0;
     this.emit();
@@ -97,34 +108,51 @@ export class ExperienceClock {
         this.raf = requestAnimationFrame(tick);
       } else {
         this.raf = null;
+        onComplete?.();
       }
     };
     this.raf = requestAnimationFrame(tick);
   }
 
+  private settleOnce(
+    gen: number,
+    token: number,
+    next: ExperiencePhase,
+    progress: number,
+    onDone?: () => void,
+  ) {
+    if (gen !== this.generation || token !== this.settleToken) return;
+    this.settleToken += 1;
+    this.clear();
+    this.phase = next;
+    this.progress = progress;
+    this.emit();
+    onDone?.();
+  }
+
   beginTransform(onDone?: () => void) {
     const gen = this.interrupt("transform");
+    const token = this.settleToken;
     const dur = this.reducedMotion ? 400 : 3200;
-    this.animateProgress(gen, dur, "transform");
-    this.after(gen, dur, () => {
-      this.phase = "humanoid";
-      this.progress = 1;
-      this.emit();
-      onDone?.();
-    });
+    const finish = () => this.settleOnce(gen, token, "humanoid", 1, onDone);
+
+    this.animateProgress(gen, dur, "transform", finish);
+    // Timeout backup — iOS Safari can stall rAF under thermal/visibility pressure
+    this.after(gen, dur + 80, finish);
+    // Hard ceiling so TRANSFORMING can never persist indefinitely
+    this.after(gen, Math.max(dur + 1800, 5200), finish);
     return gen;
   }
 
   beginReturn(onDone?: () => void) {
     const gen = this.interrupt("return");
+    const token = this.settleToken;
     const dur = this.reducedMotion ? 350 : 2800;
-    this.animateProgress(gen, dur, "return");
-    this.after(gen, dur, () => {
-      this.phase = "idle";
-      this.progress = 0;
-      this.emit();
-      onDone?.();
-    });
+    const finish = () => this.settleOnce(gen, token, "idle", 0, onDone);
+
+    this.animateProgress(gen, dur, "return", finish);
+    this.after(gen, dur + 80, finish);
+    this.after(gen, Math.max(dur + 1800, 4800), finish);
     return gen;
   }
 
