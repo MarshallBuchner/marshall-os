@@ -1,7 +1,7 @@
 /**
  * Dev-only voice lifecycle diagnostics for real-device iPhone traces.
- * Enable: ?voiceDebug=1  OR  localStorage.jarvisVoiceDebug = "1"
- * Disable: ?voiceDebug=0 OR localStorage remove / "0"
+ * Enable: ?voiceDebug=1 (required every visit — not sticky).
+ * Absent / other values: disabled. Clears any legacy localStorage flag.
  */
 
 export type VoiceDiagEvent =
@@ -50,49 +50,40 @@ export function getVoiceDiagVersion(): number {
   return diagVersion;
 }
 
-/** Pure read for useSyncExternalStore — no localStorage writes. */
-export function peekVoiceDebugEnabled(): boolean {
-  if (typeof window === "undefined") return false;
-  if (enabledCache != null) return enabledCache;
+/** True only when the URL explicitly has ?voiceDebug=1 (or true). */
+function urlVoiceDebugEnabled(): boolean {
   try {
     const q = new URLSearchParams(window.location.search).get("voiceDebug");
-    if (q === "1" || q === "true") return true;
-    if (q === "0" || q === "false") return false;
-    return localStorage.getItem("jarvisVoiceDebug") === "1";
+    return q === "1" || q === "true";
   } catch {
     return false;
   }
 }
 
+/** Drop legacy sticky flag so bare production visits stay clean. */
+function clearLegacyVoiceDebugStorage() {
+  try {
+    if (localStorage.getItem("jarvisVoiceDebug") != null) {
+      localStorage.removeItem("jarvisVoiceDebug");
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Pure read for useSyncExternalStore — no storage writes. */
+export function peekVoiceDebugEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  if (enabledCache != null) return enabledCache;
+  return urlVoiceDebugEnabled();
+}
+
 export function isVoiceDebugEnabled(): boolean {
   if (typeof window === "undefined") return false;
   if (enabledCache != null) return enabledCache;
-  try {
-    const q = new URLSearchParams(window.location.search).get("voiceDebug");
-    if (q === "1" || q === "true") {
-      enabledCache = true;
-      try {
-        localStorage.setItem("jarvisVoiceDebug", "1");
-      } catch {
-        /* ignore */
-      }
-      return true;
-    }
-    if (q === "0" || q === "false") {
-      enabledCache = false;
-      try {
-        localStorage.setItem("jarvisVoiceDebug", "0");
-      } catch {
-        /* ignore */
-      }
-      return false;
-    }
-    enabledCache = localStorage.getItem("jarvisVoiceDebug") === "1";
-    return enabledCache;
-  } catch {
-    enabledCache = false;
-    return false;
-  }
+  clearLegacyVoiceDebugStorage();
+  enabledCache = urlVoiceDebugEnabled();
+  return enabledCache;
 }
 
 export function voiceDiag(event: VoiceDiagEvent, detail?: string) {

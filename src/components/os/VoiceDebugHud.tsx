@@ -191,8 +191,8 @@ function VoiceDebugHudActive() {
 
 /**
  * Dev-only event strip for real-iPhone verification.
- * Visible only when ?voiceDebug=1 / localStorage.jarvisVoiceDebug=1.
- * Never shown on normal production URL.
+ * Visible only when the URL has ?voiceDebug=1 (not sticky / localStorage).
+ * Never shown on a bare production URL.
  */
 export function VoiceDebugHud() {
   const enabled = useSyncExternalStore(
@@ -200,6 +200,15 @@ export function VoiceDebugHud() {
     getDebugFlagSnapshot,
     getServerDebugFlagSnapshot,
   );
+
+  // Sync URL opt-in + clear any legacy sticky localStorage flag on every visit.
+  useEffect(() => {
+    try {
+      void isVoiceDebugEnabled();
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   if (!enabled) return null;
   return <VoiceDebugHudActive />;
