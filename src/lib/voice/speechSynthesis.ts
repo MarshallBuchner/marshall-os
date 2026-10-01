@@ -13,7 +13,13 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
   let muted = false;
 
   const adapter: TextToSpeechAdapter = {
-    available: isSpeechSynthesisAvailable(),
+    available: (() => {
+      try {
+        return isSpeechSynthesisAvailable();
+      } catch {
+        return false;
+      }
+    })(),
     get muted() {
       return muted;
     },
@@ -26,7 +32,11 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
     },
     stop() {
       if (typeof window === "undefined") return;
-      window.speechSynthesis?.cancel();
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {
+        /* ignore */
+      }
     },
     speak(text: string, opts?: SpeakOptions) {
       return new Promise((resolve) => {
@@ -39,8 +49,18 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
           resolve();
           return;
         }
-        adapter.stop();
-        const u = new SpeechSynthesisUtterance(trimmed);
+        try {
+          adapter.stop();
+        } catch {
+          /* ignore */
+        }
+        let u: SpeechSynthesisUtterance;
+        try {
+          u = new SpeechSynthesisUtterance(trimmed);
+        } catch {
+          resolve();
+          return;
+        }
         u.rate = 1.02;
         u.pitch = 1;
         u.volume = 0.9;
@@ -76,7 +96,13 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
           bump(0);
           resolve();
         };
-        window.speechSynthesis.speak(u);
+        try {
+          window.speechSynthesis.speak(u);
+        } catch {
+          clearPulse();
+          bump(0);
+          resolve();
+        }
       });
     },
   };

@@ -69,7 +69,12 @@ export type BrowserSttAdapter = SpeechToTextAdapter & {
 
 export function createBrowserSttAdapter(): BrowserSttAdapter {
   const Ctor = getSpeechRecognitionCtor();
-  const ios = typeof navigator !== "undefined" ? isIosWebKit() : false;
+  let ios = false;
+  try {
+    ios = typeof navigator !== "undefined" ? isIosWebKit() : false;
+  } catch {
+    ios = false;
+  }
   /** iOS: turn-based continuous=false, fresh instance every start */
   const turnBased = ios;
 
@@ -82,7 +87,11 @@ export function createBrowserSttAdapter(): BrowserSttAdapter {
   let restartAttempts = 0;
   const MAX_POST_TTS_RESTART = 1;
 
-  voiceDiag("VOICE_MODE", turnBased ? "ios-turn" : "desktop-session");
+  try {
+    voiceDiag("VOICE_MODE", turnBased ? "ios-turn" : "desktop-session");
+  } catch {
+    /* ignore */
+  }
 
   const clearRestart = () => {
     if (restartTimer != null) {

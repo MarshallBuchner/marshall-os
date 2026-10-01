@@ -17,7 +17,7 @@ import type { ActivityEvent, Project } from "@/types";
  *
  * Desktop WebGL (SpatialCore) must not mount on phones: CSS `hidden lg:block`
  * still initializes R3F/WebGL and can hard-crash iPhone Safari WebKit
- * ("This page couldn't load").
+ * ("This page couldn't load"). Gate via mount-safe useIsDesktopLg (never throws).
  */
 export function CommandEnvironment({
   activitySeed,
@@ -28,6 +28,7 @@ export function CommandEnvironment({
 }) {
   const { focus, clearFocus, setAwake } = useJarvis();
   const [menuOpen, setMenuOpen] = useState(false);
+  // false until after mount — SSR/hydration safe; phones stay false
   const isDesktop = useIsDesktopLg();
 
   useEffect(() => {

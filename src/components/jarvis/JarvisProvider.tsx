@@ -187,18 +187,38 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
   }, [presence, approvals]);
 
   useEffect(() => {
-    installVoiceDiagGlobals();
-    sttRef.current = createBrowserSttAdapter();
-    ttsRef.current = createBrowserTtsAdapter();
-    setVoiceInputAvailable(sttRef.current.available);
-    setVoiceOutputAvailable(ttsRef.current.available);
-    if (isVoiceDebugEnabled()) {
-      voiceDiag("VOICE_MODE", sttRef.current.getMode());
+    // Voice must never prevent the shell from rendering. Feature-detect + isolate.
+    try {
+      installVoiceDiagGlobals();
+    } catch {
+      /* ignore */
+    }
+    try {
+      sttRef.current = createBrowserSttAdapter();
+      setVoiceInputAvailable(Boolean(sttRef.current?.available));
+      if (isVoiceDebugEnabled() && sttRef.current) {
+        voiceDiag("VOICE_MODE", sttRef.current.getMode());
+      }
+    } catch {
+      sttRef.current = null;
+      setVoiceInputAvailable(false);
+      setVoiceError("VOICE INPUT NOT AVAILABLE");
+    }
+    try {
+      ttsRef.current = createBrowserTtsAdapter();
+      setVoiceOutputAvailable(Boolean(ttsRef.current?.available));
+    } catch {
+      ttsRef.current = null;
+      setVoiceOutputAvailable(false);
     }
 
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    jarvisMotionClock.setReducedMotion(reduced);
-    jarvisExperienceClock.setReducedMotion(reduced);
+    try {
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      jarvisMotionClock.setReducedMotion(reduced);
+      jarvisExperienceClock.setReducedMotion(reduced);
+    } catch {
+      /* ignore */
+    }
 
     const unsub = jarvisExperienceClock.subscribe((phase, progress) => {
       setTransformProgress(progress);
@@ -210,8 +230,16 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
 
     return () => {
       unsub();
-      sttRef.current?.abort();
-      ttsRef.current?.stop();
+      try {
+        sttRef.current?.abort();
+      } catch {
+        /* ignore */
+      }
+      try {
+        ttsRef.current?.stop();
+      } catch {
+        /* ignore */
+      }
       jarvisMotionClock.interrupt("idle");
       jarvisExperienceClock.interrupt("idle");
     };
