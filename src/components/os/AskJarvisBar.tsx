@@ -14,6 +14,7 @@ export function AskJarvisBar({ showPrompt = true, cinematic = true }: Props) {
     submit,
     busy,
     listening,
+    speaking,
     startListening,
     stopListening,
     voiceSessionActive,
@@ -98,17 +99,22 @@ export function AskJarvisBar({ showPrompt = true, cinematic = true }: Props) {
           {voiceError}
         </p>
       )}
-      {(listening || voiceSessionActive) && !voiceError && (
+      {speaking && (
+        <p className="ask-status" role="status">
+          Speaking
+        </p>
+      )}
+      {(listening || voiceSessionActive) && !voiceError && !speaking && (
         <p className="ask-status" role="status">
           {listening ? "Listening" : "Voice session"}
         </p>
       )}
-      {(presence === "transforming" || presence === "returning") && (
+      {(presence === "transforming" || presence === "returning") && !speaking && (
         <p className="ask-status" role="status">
           {presence === "transforming" ? "Transforming" : "Returning"}
         </p>
       )}
-      {presence === "humanoid" && (
+      {presence === "humanoid" && !speaking && !listening && (
         <p className="ask-status" role="status">
           Presence online
         </p>

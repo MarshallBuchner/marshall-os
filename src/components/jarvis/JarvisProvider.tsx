@@ -34,6 +34,7 @@ import {
   isStableInterim,
   parseVoiceIntent,
 } from "@/lib/voice/voiceIntents";
+import { getAgent, getProject } from "@/lib/registry/projects";
 
 export type FocusTarget =
   | { kind: "system"; id: string }
@@ -171,6 +172,8 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
   const lastInterimRef = useRef({ text: "", since: 0 });
   const lastExecutedRef = useRef({ key: "", at: 0 });
   const executeVoiceRef = useRef<(raw: string, fromFinal: boolean) => void>(() => {});
+  const speakChainRef = useRef(Promise.resolve());
+  const speakingRef = useRef(false);
 
   useEffect(() => {
     presenceRef.current = presence;
@@ -214,25 +217,45 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     if (f) setContextPanel("focus");
   }, []);
 
-  const speak = useCallback(async (text: string) => {
-    const tts = ttsRef.current;
-    if (!tts?.available || tts.muted || !text) return;
-    const stt = sttRef.current;
-    // Pause recognition during TTS so Safari doesn't eat the next phrase
-    stt?.pauseForTts();
-    setListening(false);
-    setSpeaking(true);
-    setAudioLevel(0.45);
-    try {
-      await tts.speak(text);
-    } finally {
-      setSpeaking(false);
-      setAudioLevel(0);
-      if (stt?.sessionActive) {
-        setListening(true);
-        stt.resumeAfterTts();
+  /**
+   * First-class spoken response — serialised queue.
+   * Pauses STT for the whole utterance so Jarvis never hears himself,
+   * drives SPEAKING + audioLevel, then resumes LISTENING if session active.
+   */
+  const speak = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return Promise.resolve();
+
+    const run = async () => {
+      const tts = ttsRef.current;
+      if (!tts?.available || tts.muted) return;
+      const stt = sttRef.current;
+      // Prevent SpeechRecognition from capturing Jarvis's own voice
+      stt?.pauseForTts();
+      setListening(false);
+      speakingRef.current = true;
+      setSpeaking(true);
+      setAudioLevel(0.45);
+      try {
+        await tts.speak(trimmed, {
+          onEnergy: (level) => {
+            if (speakingRef.current) setAudioLevel(level);
+          },
+        });
+      } finally {
+        speakingRef.current = false;
+        setSpeaking(false);
+        setAudioLevel(0);
+        if (stt?.sessionActive) {
+          setListening(true);
+          stt.resumeAfterTts();
+        }
       }
-    }
+    };
+
+    const next = speakChainRef.current.then(run, run);
+    speakChainRef.current = next.catch(() => undefined);
+    return next;
   }, []);
 
   const setVoiceMuted = useCallback((muted: boolean) => {
@@ -244,7 +267,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const beginTransform = useCallback(() => {
+  const startTransformPresence = useCallback(() => {
     setPresenceDiagnostic(null);
     setPresence((p) => {
       if (p === "humanoid" || p === "transforming") return p;
@@ -252,12 +275,37 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const returnToCore = useCallback(() => {
+  const startReturnPresence = useCallback(() => {
     setPresence((p) => {
       if (p === "core" || p === "returning") return p;
       return "returning";
     });
   }, []);
+
+  /** User-facing transform: short ack → action → "Presence online." (via clock) */
+  const beginTransform = useCallback(() => {
+    if (
+      presenceRef.current === "humanoid" ||
+      presenceRef.current === "transforming"
+    ) {
+      return;
+    }
+    void (async () => {
+      await speak(jarvisPhraseFor("transform_ack"));
+      startTransformPresence();
+    })();
+  }, [speak, startTransformPresence]);
+
+  /** User-facing return: "Returning." → action → "Core online." (via clock) */
+  const returnToCore = useCallback(() => {
+    if (presenceRef.current === "core" || presenceRef.current === "returning") {
+      return;
+    }
+    void (async () => {
+      await speak(jarvisPhraseFor("returning"));
+      startReturnPresence();
+    })();
+  }, [speak, startReturnPresence]);
 
   // Drive experience clock from presence transitions
   useEffect(() => {
@@ -265,13 +313,14 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       jarvisExperienceClock.beginTransform(() => {
         setPresence("humanoid");
         setPresenceDiagnostic(null);
-        void speak("Presence online.");
+        void speak(jarvisPhraseFor("presence_online"));
       });
     }
     if (presence === "returning" && jarvisExperienceClock.getPhase() !== "return") {
       jarvisExperienceClock.beginReturn(() => {
         setPresence("core");
         setTransformProgress(0);
+        void speak(jarvisPhraseFor("core_online"));
       });
     }
   }, [presence, speak]);
@@ -321,21 +370,26 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       const trimmed = cleanTranscriptDisplay(input);
       if (!trimmed) return null;
 
-      // Local presence / show intents — shared with voice path
+      // Local presence / show intents — shared with voice path (same pipeline entry)
       const voiceIntent = parseVoiceIntent(trimmed);
       if (voiceIntent.kind === "TRANSFORM_HUMANOID") {
         beginTransform();
         return null;
       }
       if (voiceIntent.kind === "RETURN_TO_CORE") {
-        if (presenceRef.current !== "core") returnToCore();
+        returnToCore();
         return null;
       }
       if (voiceIntent.kind === "SHOW_SYSTEM") {
+        const project = getProject(voiceIntent.projectId);
         setFocus({ kind: "system", id: voiceIntent.projectId });
         setContextPanel("focus");
         setAwake(true);
-        void speak(jarvisPhraseFor("ack"));
+        void speak(
+          jarvisPhraseFor("opening_system", {
+            name: project?.name ?? voiceIntent.projectId,
+          }),
+        );
         return null;
       }
 
@@ -369,19 +423,39 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
           setFocus({ kind: "system", id: cmd.routedProjectId });
           setContextPanel("focus");
         }
+
+        // Spoken result — same path for typed and voice-submitted commands
         if (cmd.status === "WAITING_APPROVAL") {
           jarvisMotionClock.settleApproval();
           setContextPanel("approvals");
-          void speak(jarvisPhraseFor("approval"));
+          if (cmd.routedAgentId) {
+            const agent = getAgent(cmd.routedAgentId);
+            const short =
+              cmd.routedAgentId === "cursor"
+                ? "Cursor"
+                : (agent?.name ?? cmd.routedAgentId);
+            await speak(jarvisPhraseFor("routing_agent", { name: short }));
+          }
+          await speak(jarvisPhraseFor("approval"));
         } else if (cmd.status === "COMPLETED") {
+          if (cmd.routedAgentId) {
+            const agent = getAgent(cmd.routedAgentId);
+            const short =
+              cmd.routedAgentId === "cursor"
+                ? "Cursor"
+                : (agent?.name ?? cmd.routedAgentId);
+            await speak(jarvisPhraseFor("routing_agent", { name: short }));
+          }
           jarvisMotionClock.beginApprovedFlow({
             onSpeak: () => {
               void speak(jarvisPhraseFor("complete"));
             },
           });
           jarvisMotionClock.returnIdle(2800);
+        } else if (cmd.status === "FAILED") {
+          await speak(jarvisPhraseFor("error"));
         } else {
-          void speak(jarvisPhraseFor("ack"));
+          await speak(jarvisPhraseFor("ack"));
         }
 
         if (lower.includes("attention")) setContextPanel("attention");
@@ -392,7 +466,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
         return cmd;
       } catch {
         jarvisMotionClock.markError();
-        void speak(jarvisPhraseFor("error"));
+        await speak(jarvisPhraseFor("error"));
         return null;
       } finally {
         setBusy(false);
@@ -406,12 +480,14 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       setBusy(true);
       try {
         if (decision === "approved") {
+          await speak(jarvisPhraseFor("approved"));
           jarvisMotionClock.beginApprovedFlow({
             onSpeak: () => {
               void speak(jarvisPhraseFor("complete"));
             },
           });
         } else {
+          await speak(jarvisPhraseFor("rejected"));
           jarvisMotionClock.interrupt("idle");
         }
         const res = await fetch("/api/approvals", {
@@ -430,6 +506,8 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
         if (data.approvals) setApprovals(data.approvals);
         else await refresh();
         jarvisMotionClock.returnIdle(2200);
+      } catch {
+        await speak(jarvisPhraseFor("error"));
       } finally {
         setBusy(false);
       }
@@ -460,19 +538,17 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       pendingTranscript.current = "";
       lastInterimRef.current = { text: "", since: 0 };
 
+      // Same handlers as typed submit — no approval/safety bypass
       if (intent.kind === "TRANSFORM_HUMANOID") {
         beginTransform();
         return;
       }
       if (intent.kind === "RETURN_TO_CORE") {
-        if (presenceRef.current !== "core") returnToCore();
+        returnToCore();
         return;
       }
       if (intent.kind === "SHOW_SYSTEM") {
-        setFocus({ kind: "system", id: intent.projectId });
-        setContextPanel("focus");
-        setAwake(true);
-        void speak(jarvisPhraseFor("ack"));
+        void submit(display);
         return;
       }
       if (intent.kind === "APPROVE" || intent.kind === "REJECT") {
@@ -489,7 +565,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
         void submit(intent.displayText || display);
       }
     },
-    [beginTransform, returnToCore, resolve, submit, speak],
+    [beginTransform, returnToCore, resolve, submit],
   );
 
   useEffect(() => {
@@ -526,6 +602,9 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     setAudioLevel(0.35);
 
     stt.onResult = (r) => {
+      // Hard ignore while Jarvis is speaking (belt + pauseForTts)
+      if (speakingRef.current) return;
+
       const text = cleanTranscriptDisplay(r.transcript);
       setTranscript(text);
       pendingTranscript.current = text;

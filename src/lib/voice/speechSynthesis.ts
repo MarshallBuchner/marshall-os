@@ -3,7 +3,7 @@
  * Isolated behind interface for future cloud TTS swap.
  */
 
-import type { TextToSpeechAdapter } from "@/lib/voice/types";
+import type { TextToSpeechAdapter, SpeakOptions } from "@/lib/voice/types";
 
 export function isSpeechSynthesisAvailable(): boolean {
   return typeof window !== "undefined" && "speechSynthesis" in window;
@@ -28,7 +28,7 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
       if (typeof window === "undefined") return;
       window.speechSynthesis?.cancel();
     },
-    speak(text: string) {
+    speak(text: string, opts?: SpeakOptions) {
       return new Promise((resolve) => {
         if (!adapter.available || muted) {
           resolve();
@@ -44,8 +44,38 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
         u.rate = 1.02;
         u.pitch = 1;
         u.volume = 0.9;
-        u.onend = () => resolve();
-        u.onerror = () => resolve();
+
+        let pulse: ReturnType<typeof setInterval> | null = null;
+        const clearPulse = () => {
+          if (pulse != null) {
+            clearInterval(pulse);
+            pulse = null;
+          }
+        };
+
+        const bump = (level: number) => {
+          opts?.onEnergy?.(Math.max(0, Math.min(1, level)));
+        };
+
+        // Soft OS-voice energy while speaking (drives SPEAKING visuals / jaw)
+        bump(0.42);
+        pulse = setInterval(() => {
+          bump(0.32 + Math.random() * 0.4);
+        }, 90);
+
+        u.onboundary = () => {
+          bump(0.55 + Math.random() * 0.35);
+        };
+        u.onend = () => {
+          clearPulse();
+          bump(0);
+          resolve();
+        };
+        u.onerror = () => {
+          clearPulse();
+          bump(0);
+          resolve();
+        };
         window.speechSynthesis.speak(u);
       });
     },
@@ -54,19 +84,52 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
   return adapter;
 }
 
-/** Short Jarvis phrases — never verbose narration */
+/** Concise OS voice — never chatbot paragraphs */
+export type JarvisPhraseKind =
+  | "ack"
+  | "transform_ack"
+  | "presence_online"
+  | "returning"
+  | "core_online"
+  | "opening_system"
+  | "routing_agent"
+  | "approval"
+  | "approved"
+  | "rejected"
+  | "complete"
+  | "error"
+  | "listening";
+
 export function jarvisPhraseFor(
-  kind: "ack" | "approval" | "complete" | "error" | "listening",
+  kind: JarvisPhraseKind,
+  ctx?: { name?: string },
 ): string {
+  const name = (ctx?.name ?? "").trim();
   switch (kind) {
     case "ack":
       return "On it.";
+    case "transform_ack":
+      return "Of course.";
+    case "presence_online":
+      return "Presence online.";
+    case "returning":
+      return "Returning.";
+    case "core_online":
+      return "Core online.";
+    case "opening_system":
+      return name ? `Opening ${name}.` : "Opening that system.";
+    case "routing_agent":
+      return name ? `Routing that to ${name}.` : "Routing that.";
     case "approval":
-      return "This needs your approval.";
+      return "This requires your approval.";
+    case "approved":
+      return "Approved. Proceeding.";
+    case "rejected":
+      return "Cancelled.";
     case "complete":
-      return "Done. Simulated result ready.";
+      return "Done.";
     case "error":
-      return "That didn't work.";
+      return "I couldn't complete that.";
     case "listening":
       return "";
     default:

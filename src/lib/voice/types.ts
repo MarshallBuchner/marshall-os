@@ -20,10 +20,15 @@ export interface SpeechToTextAdapter {
   onError: ((message: string) => void) | null;
 }
 
+export type SpeakOptions = {
+  /** 0–1 energy while utterance is active — drives SPEAKING visuals */
+  onEnergy?: (level: number) => void;
+};
+
 export interface TextToSpeechAdapter {
   readonly available: boolean;
   muted: boolean;
-  speak(text: string): Promise<void>;
+  speak(text: string, opts?: SpeakOptions): Promise<void>;
   stop(): void;
   setMuted(muted: boolean): void;
 }
