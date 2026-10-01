@@ -8,6 +8,7 @@ import {
 } from "@/lib/voice/voiceDiagnostics";
 
 function subscribeDiag(cb: () => void) {
+  if (typeof window === "undefined") return () => {};
   window.addEventListener("jarvis-voice-diag", cb);
   const id = window.setInterval(cb, 500);
   return () => {
@@ -24,24 +25,12 @@ function getServerSnapshot(): VoiceDiagEntry[] {
   return [];
 }
 
-/**
- * Dev-only event strip for real-iPhone verification.
- * Visible only when ?voiceDebug=1 / localStorage.jarvisVoiceDebug=1.
- */
-export function VoiceDebugHud() {
-  const [enabled] = useState(() =>
-    typeof window !== "undefined" ? isVoiceDebugEnabled() : false,
-  );
+function VoiceDebugHudActive() {
   const lines = useSyncExternalStore(subscribeDiag, getDiagSnapshot, getServerSnapshot);
 
   useEffect(() => {
-    // Ensure globals exist when HUD mounts with debug already on
-    if (enabled) {
-      void import("@/lib/voice/voiceDiagnostics").then((m) => m.installVoiceDiagGlobals());
-    }
-  }, [enabled]);
-
-  if (!enabled) return null;
+    void import("@/lib/voice/voiceDiagnostics").then((m) => m.installVoiceDiagGlobals());
+  }, []);
 
   return (
     <div
@@ -79,4 +68,18 @@ export function VoiceDebugHud() {
       ))}
     </div>
   );
+}
+
+/**
+ * Dev-only event strip for real-iPhone verification.
+ * Visible only when ?voiceDebug=1 / localStorage.jarvisVoiceDebug=1.
+ * When debug is off (normal production), mounts nothing — no window/subscribe work.
+ */
+export function VoiceDebugHud() {
+  const [enabled] = useState(() =>
+    typeof window !== "undefined" ? isVoiceDebugEnabled() : false,
+  );
+
+  if (!enabled) return null;
+  return <VoiceDebugHudActive />;
 }

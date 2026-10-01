@@ -8,11 +8,16 @@ import { AttentionDot } from "@/components/os/AttentionDot";
 import { ContextualDrawer } from "@/components/os/ContextualDrawer";
 import { MobileRemote } from "@/components/os/MobileRemote";
 import { useJarvis } from "@/components/jarvis/JarvisProvider";
+import { useIsDesktopLg } from "@/lib/useMediaQuery";
 import type { ActivityEvent, Project } from "@/types";
 
 /**
  * V0.25 cinematic Overview — Jarvis owns the screen.
  * Initial: brand + large core + prompt + ask/mic + attention dot.
+ *
+ * Desktop WebGL (SpatialCore) must not mount on phones: CSS `hidden lg:block`
+ * still initializes R3F/WebGL and can hard-crash iPhone Safari WebKit
+ * ("This page couldn't load").
  */
 export function CommandEnvironment({
   activitySeed,
@@ -23,6 +28,7 @@ export function CommandEnvironment({
 }) {
   const { focus, clearFocus, setAwake } = useJarvis();
   const [menuOpen, setMenuOpen] = useState(false);
+  const isDesktop = useIsDesktopLg();
 
   useEffect(() => {
     document.documentElement.classList.add("overview-cinematic");
@@ -33,6 +39,7 @@ export function CommandEnvironment({
     <div className="jarvis-home cinematic-home">
       <MobileRemote activitySeed={activitySeed} />
 
+      {/* Keep desktop chrome in the tree for CSS layout; gate WebGL mount only. */}
       <div className="hidden lg:block desktop-cinematic">
         <div className="desktop-hero">
           <div className="desktop-hero-chrome">
@@ -83,7 +90,7 @@ export function CommandEnvironment({
           )}
 
           <div className="desktop-core-stage">
-            <SpatialCore />
+            {isDesktop ? <SpatialCore /> : null}
           </div>
 
           <div className="desktop-ask-overlay">
