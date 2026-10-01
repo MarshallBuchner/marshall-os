@@ -2,6 +2,10 @@
  * Web Speech TTS adapter — short phrases, mute/unmute, interruptible.
  * Prefers a calm British English system voice when the platform provides one.
  * Never blocks speaking if the preferred voice is unavailable.
+ *
+ * Authoritative speak path: createBrowserTtsAdapter().speak → speechSynthesis.speak.
+ * Voice selection re-resolves a live SpeechSynthesisVoice from getVoices() at speak time
+ * (iOS Safari stale voice objects otherwise silently fall back to a non-British default).
  */
 
 import type { TextToSpeechAdapter, SpeakOptions } from "@/lib/voice/types";
@@ -12,22 +16,47 @@ export const JARVIS_TTS_RATE = 0.93;
 export const JARVIS_TTS_PITCH = 0.94;
 export const JARVIS_TTS_VOLUME = 1;
 
+/** Preference label — not proof the engine used this voice. */
+export const TTS_VOICE_REQUESTED = "Daniel en-GB (British male system voice)";
+
 export type TtsVoiceDebug = {
-  name: string;
+  /** Stated preference (never proof of engine selection). */
+  requested: string;
+  /** en-GB voice names present in the last getVoices() snapshot. */
+  availableEnGb: string[];
+  /** Voice chosen by pickJarvisTtsVoice from that snapshot. */
+  selectedName: string;
+  selectedLang: string;
+  /**
+   * utterance.voice immediately before speechSynthesis.speak.
+   * If "(undefined)" / empty — the bug: engine will use platform default.
+   */
+  actualName: string;
+  actualLang: string;
   lang: string;
   rate: number;
   pitch: number;
   volume: number;
+  /** HUD shorthand — mirrors ACTUAL when known, else SELECTED. */
+  name: string;
 };
 
-let selectedVoice: SpeechSynthesisVoice | null = null;
-let voiceDebug: TtsVoiceDebug = {
-  name: "(default)",
-  lang: "en",
+const emptyDebug = (): TtsVoiceDebug => ({
+  requested: TTS_VOICE_REQUESTED,
+  availableEnGb: [],
+  selectedName: "(none)",
+  selectedLang: "",
+  actualName: "(undefined)",
+  actualLang: "",
+  lang: "en-GB",
   rate: JARVIS_TTS_RATE,
   pitch: JARVIS_TTS_PITCH,
   volume: JARVIS_TTS_VOLUME,
-};
+  name: "(pending)",
+});
+
+let voiceDebug: TtsVoiceDebug = emptyDebug();
+let voicesListenerInstalled = false;
 
 export function getTtsVoiceDebug(): TtsVoiceDebug {
   return voiceDebug;
@@ -56,76 +85,139 @@ function isEnglish(v: SpeechSynthesisVoice): boolean {
 function maleScore(v: SpeechSynthesisVoice): number {
   const n = v.name || "";
   if (FEMALE_NAME_HINTS.test(n)) return -2;
-  if (MALE_NAME_HINTS.test(n)) return 2;
-  // Some engines expose gender in name as "Google UK English Male"
   if (/\bmale\b/i.test(n)) return 3;
+  if (MALE_NAME_HINTS.test(n)) return 2;
   return 0;
 }
 
+function isDanielEnGb(v: SpeechSynthesisVoice): boolean {
+  return isEnGb(v) && /\bdaniel\b/i.test(v.name || "");
+}
+
 /**
- * Preference: en-GB male → any en-GB → any English → null (platform default).
+ * Preference: real Daniel en-GB → best en-GB male (known names) → best en-GB → English → null.
+ * Always returns a real SpeechSynthesisVoice from the provided list, or null.
+ * Never fabricates a voice object from a name string.
  */
 export function pickJarvisTtsVoice(
   voices: SpeechSynthesisVoice[],
 ): SpeechSynthesisVoice | null {
   if (!voices.length) return null;
+
+  const daniel = voices.find(isDanielEnGb);
+  if (daniel) return daniel;
+
   const enGb = voices.filter(isEnGb);
   if (enGb.length) {
-    const ranked = [...enGb].sort((a, b) => maleScore(b) - maleScore(a));
-    if (maleScore(ranked[0]) > 0) return ranked[0];
-    return ranked[0];
+    const males = [...enGb]
+      .filter((v) => maleScore(v) > 0)
+      .sort((a, b) => maleScore(b) - maleScore(a));
+    if (males.length) return males[0];
+    return enGb[0];
   }
+
   const en = voices.filter(isEnglish);
   if (en.length) {
-    const ranked = [...en].sort((a, b) => maleScore(b) - maleScore(a));
-    return ranked[0];
+    const males = [...en]
+      .filter((v) => maleScore(v) > 0)
+      .sort((a, b) => maleScore(b) - maleScore(a));
+    if (males.length) return males[0];
+    return en[0];
   }
+
   return null;
 }
 
-function applyVoiceDebug(voice: SpeechSynthesisVoice | null) {
-  voiceDebug = {
-    name: voice?.name || "(default)",
-    lang: voice?.lang || "en",
-    rate: JARVIS_TTS_RATE,
-    pitch: JARVIS_TTS_PITCH,
-    volume: JARVIS_TTS_VOLUME,
-  };
+/** Re-resolve preferred voice against a fresh getVoices() list (iOS stale-object fix). */
+function resolveLiveVoice(
+  preferred: SpeechSynthesisVoice | null,
+  liveList: SpeechSynthesisVoice[],
+): SpeechSynthesisVoice | null {
+  if (!preferred || !liveList.length) return null;
+  if (preferred.voiceURI) {
+    const byUri = liveList.find((v) => v.voiceURI === preferred.voiceURI);
+    if (byUri) return byUri;
+  }
+  const byNameLang = liveList.find(
+    (v) => v.name === preferred.name && v.lang === preferred.lang,
+  );
+  if (byNameLang) return byNameLang;
+  return liveList.find((v) => v.name === preferred.name) || null;
 }
 
-function refreshVoices(): SpeechSynthesisVoice | null {
-  if (!isSpeechSynthesisAvailable()) {
-    selectedVoice = null;
-    applyVoiceDebug(null);
-    return null;
-  }
+function readVoices(): SpeechSynthesisVoice[] {
+  if (!isSpeechSynthesisAvailable()) return [];
   try {
-    const list = window.speechSynthesis.getVoices() || [];
-    selectedVoice = pickJarvisTtsVoice(list);
-    applyVoiceDebug(selectedVoice);
-    if (list.length) {
-      voiceDiag(
-        "TTS_VOICE",
-        `${voiceDebug.name} · ${voiceDebug.lang} · rate=${voiceDebug.rate} pitch=${voiceDebug.pitch}`,
-      );
-    }
-    return selectedVoice;
+    return window.speechSynthesis.getVoices() || [];
   } catch {
-    selectedVoice = null;
-    applyVoiceDebug(null);
-    return null;
+    return [];
   }
+}
+
+/**
+ * Bounded wait for iOS/Chrome async voice population.
+ * Resolves with whatever is available — never infinite, never blocks forever.
+ */
+function waitForVoices(maxMs = 1500): Promise<SpeechSynthesisVoice[]> {
+  const immediate = readVoices();
+  if (immediate.length) return Promise.resolve(immediate);
+  if (!isSpeechSynthesisAvailable()) return Promise.resolve([]);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let poll: ReturnType<typeof setInterval> | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (voices: SpeechSynthesisVoice[]) => {
+      if (settled) return;
+      settled = true;
+      try {
+        window.speechSynthesis.removeEventListener?.("voiceschanged", onChange);
+      } catch {
+        /* ignore */
+      }
+      if (poll != null) clearInterval(poll);
+      if (timer != null) clearTimeout(timer);
+      resolve(voices);
+    };
+
+    const onChange = () => {
+      const list = readVoices();
+      if (list.length) finish(list);
+    };
+
+    try {
+      window.speechSynthesis.addEventListener?.("voiceschanged", onChange);
+    } catch {
+      /* ignore */
+    }
+
+    // Kick Chrome/Safari voice load
+    try {
+      void window.speechSynthesis.getVoices();
+    } catch {
+      /* ignore */
+    }
+
+    poll = setInterval(() => {
+      const list = readVoices();
+      if (list.length) finish(list);
+    }, 100);
+
+    timer = setTimeout(() => finish(readVoices()), maxMs);
+  });
 }
 
 function ensureVoicesListener() {
   if (typeof window === "undefined" || !isSpeechSynthesisAvailable()) return;
+  if (voicesListenerInstalled) return;
+  voicesListenerInstalled = true;
   try {
-    refreshVoices();
-    // Chrome/Safari often populate voices asynchronously
+    void window.speechSynthesis.getVoices();
     window.speechSynthesis.addEventListener?.("voiceschanged", () => {
-      refreshVoices();
+      // Warm cache only — speak() always re-reads live voices
+      void readVoices();
     });
-    // Legacy Safari
     const synth = window.speechSynthesis as SpeechSynthesis & {
       onvoiceschanged?: (() => void) | null;
     };
@@ -136,11 +228,56 @@ function ensureVoicesListener() {
       } catch {
         /* ignore */
       }
-      refreshVoices();
+      void readVoices();
     };
   } catch {
     /* never block TTS */
   }
+}
+
+function formatVoiceLabel(v: SpeechSynthesisVoice | null | undefined): string {
+  if (!v) return "(undefined)";
+  return `${v.name || "(unnamed)"} · ${v.lang || "?"}`;
+}
+
+/**
+ * Record REQUESTED / AVAILABLE / SELECTED / ACTUAL from the live utterance.
+ * ACTUAL must come from utterance.voice — never from the preferred/selected cache alone.
+ */
+function commitUtteranceDebug(
+  selected: SpeechSynthesisVoice | null,
+  available: SpeechSynthesisVoice[],
+  utterance: SpeechSynthesisUtterance,
+) {
+  const actual = utterance.voice ?? null;
+  const enGbNames = available.filter(isEnGb).map((v) => `${v.name} (${v.lang})`);
+  voiceDebug = {
+    requested: TTS_VOICE_REQUESTED,
+    availableEnGb: enGbNames,
+    selectedName: selected?.name || "(none)",
+    selectedLang: selected?.lang || "",
+    actualName: actual?.name || "(undefined)",
+    actualLang: actual?.lang || "",
+    lang: utterance.lang || "",
+    rate: utterance.rate,
+    pitch: utterance.pitch,
+    volume: utterance.volume,
+    name: actual?.name || selected?.name || "(default)",
+  };
+
+  voiceDiag(
+    "TTS_VOICE",
+    [
+      `REQUESTED=${TTS_VOICE_REQUESTED}`,
+      `AVAILABLE_enGB=[${enGbNames.join(" | ") || "none"}]`,
+      `SELECTED=${formatVoiceLabel(selected)}`,
+      `ACTUAL=${formatVoiceLabel(actual)}`,
+      `lang=${utterance.lang}`,
+      `rate=${utterance.rate}`,
+      `pitch=${utterance.pitch}`,
+      `volume=${utterance.volume}`,
+    ].join(" · "),
+  );
 }
 
 export function createBrowserTtsAdapter(): TextToSpeechAdapter {
@@ -174,99 +311,109 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
       }
     },
     speak(text: string, opts?: SpeakOptions) {
-      return new Promise((resolve) => {
-        if (!adapter.available || muted) {
-          resolve();
-          return;
-        }
+      return (async () => {
+        if (!adapter.available || muted) return;
         const trimmed = text.trim().slice(0, 220);
-        if (!trimmed) {
-          resolve();
-          return;
-        }
+        if (!trimmed) return;
+
         try {
           adapter.stop();
         } catch {
           /* ignore */
         }
+
+        // Bounded wait — never infinite; speak even if list stays empty
+        let available: SpeechSynthesisVoice[] = [];
+        try {
+          available = await waitForVoices(1500);
+        } catch {
+          available = readVoices();
+        }
+
+        // Fresh snapshot again immediately before assign (iOS stale objects)
+        const liveList = readVoices();
+        const list = liveList.length ? liveList : available;
+        const preferred = pickJarvisTtsVoice(list);
+        const selected = resolveLiveVoice(preferred, list) || preferred;
+
         let u: SpeechSynthesisUtterance;
         try {
           u = new SpeechSynthesisUtterance(trimmed);
         } catch {
-          resolve();
           return;
         }
 
-        // Re-pick if voices arrived after adapter create
-        if (!selectedVoice) {
-          try {
-            refreshVoices();
-          } catch {
-            /* ignore */
-          }
-        }
+        // Assign voice + lang first, then delivery params — do not recreate utterance after
         try {
-          if (selectedVoice) u.voice = selectedVoice;
-          if (selectedVoice?.lang) u.lang = selectedVoice.lang;
-          else u.lang = "en-GB";
+          if (selected) {
+            u.voice = selected;
+            u.lang = selected.lang || "en-GB";
+          } else {
+            u.lang = "en-GB";
+          }
         } catch {
-          /* speak with platform default */
+          try {
+            u.lang = "en-GB";
+          } catch {
+            /* platform default */
+          }
         }
 
         u.rate = JARVIS_TTS_RATE;
         u.pitch = JARVIS_TTS_PITCH;
         u.volume = JARVIS_TTS_VOLUME;
-        applyVoiceDebug(selectedVoice);
-        voiceDiag(
-          "TTS_VOICE",
-          `${voiceDebug.name} · ${voiceDebug.lang} · rate=${voiceDebug.rate} pitch=${voiceDebug.pitch}`,
-        );
 
-        let settled = false;
-        let pulse: ReturnType<typeof setInterval> | null = null;
-        const clearPulse = () => {
-          if (pulse != null) {
-            clearInterval(pulse);
-            pulse = null;
+        // Log ACTUAL utterance fields immediately BEFORE speak
+        commitUtteranceDebug(selected, list, u);
+
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          let pulse: ReturnType<typeof setInterval> | null = null;
+          const clearPulse = () => {
+            if (pulse != null) {
+              clearInterval(pulse);
+              pulse = null;
+            }
+          };
+
+          const done = () => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(guard);
+            clearPulse();
+            opts?.onEnergy?.(0);
+            resolve();
+          };
+
+          // iOS Safari often never fires utterance onend — must not stall transform/return
+          const guard = window.setTimeout(
+            done,
+            Math.min(6000, 600 + trimmed.length * 90),
+          );
+
+          const bump = (level: number) => {
+            if (settled) return;
+            opts?.onEnergy?.(Math.max(0, Math.min(1, level)));
+          };
+
+          bump(0.42);
+          pulse = setInterval(() => {
+            bump(0.32 + Math.random() * 0.4);
+          }, 90);
+
+          u.onboundary = () => {
+            bump(0.55 + Math.random() * 0.35);
+          };
+          u.onend = () => done();
+          u.onerror = () => done();
+
+          try {
+            window.speechSynthesis.speak(u);
+          } catch {
+            done();
           }
-        };
-
-        const done = () => {
-          if (settled) return;
-          settled = true;
-          window.clearTimeout(guard);
-          clearPulse();
-          opts?.onEnergy?.(0);
-          resolve();
-        };
-
-        // iOS Safari often never fires utterance onend — must not stall transform/return
-        const guard = window.setTimeout(
-          done,
-          Math.min(6000, 600 + trimmed.length * 90),
-        );
-
-        const bump = (level: number) => {
-          if (settled) return;
-          opts?.onEnergy?.(Math.max(0, Math.min(1, level)));
-        };
-
-        bump(0.42);
-        pulse = setInterval(() => {
-          bump(0.32 + Math.random() * 0.4);
-        }, 90);
-
-        u.onboundary = () => {
-          bump(0.55 + Math.random() * 0.35);
-        };
-        u.onend = () => done();
-        u.onerror = () => done();
-        try {
-          window.speechSynthesis.speak(u);
-        } catch {
-          done();
-        }
-      });
+        });
+      })();
     },
   };
 

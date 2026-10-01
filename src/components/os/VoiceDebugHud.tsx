@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useSyncExternalStore } from "react";
+import { useJarvis } from "@/components/jarvis/JarvisProvider";
 import {
   getVoiceDiagSnapshot,
   getVoiceDiagVersion,
@@ -9,6 +10,8 @@ import {
   type VoiceDiagEntry,
 } from "@/lib/voice/voiceDiagnostics";
 import { getTtsVoiceDebug } from "@/lib/voice/speechSynthesis";
+
+const TEST_PHRASE = "Good evening. Jarvis voice systems are online.";
 
 function subscribeDiag(cb: () => void) {
   if (typeof window === "undefined") return () => {};
@@ -69,12 +72,21 @@ function subscribeTtsVoice(cb: () => void) {
   };
 }
 
-let cachedTtsLabel = "TTS voice · (pending)";
+let cachedTtsLabel =
+  "REQUESTED · SELECTED · ACTUAL · LANG/RATE/PITCH (pending speak)";
 
 function getTtsLabelSnapshot(): string {
   try {
     const v = getTtsVoiceDebug();
-    const label = `TTS voice · ${v.name} · ${v.lang} · rate=${v.rate} pitch=${v.pitch}`;
+    const label = [
+      `REQUESTED=${v.requested}`,
+      `SELECTED=${v.selectedName}${v.selectedLang ? `/${v.selectedLang}` : ""}`,
+      `ACTUAL=${v.actualName}${v.actualLang ? `/${v.actualLang}` : ""}`,
+      `LANG=${v.lang}`,
+      `RATE=${v.rate}`,
+      `PITCH=${v.pitch}`,
+      `enGB=[${v.availableEnGb.join(" | ") || "none"}]`,
+    ].join(" · ");
     if (label !== cachedTtsLabel) cachedTtsLabel = label;
     return cachedTtsLabel;
   } catch {
@@ -83,10 +95,11 @@ function getTtsLabelSnapshot(): string {
 }
 
 function getServerTtsLabelSnapshot(): string {
-  return "TTS voice · (pending)";
+  return "REQUESTED · SELECTED · ACTUAL · LANG/RATE/PITCH (pending speak)";
 }
 
 function VoiceDebugHudActive() {
+  const { speak } = useJarvis();
   const lines = useSyncExternalStore(subscribeDiag, getDiagSnapshot, getServerDiagSnapshot);
   const ttsLine = useSyncExternalStore(
     subscribeTtsVoice,
@@ -114,7 +127,7 @@ function VoiceDebugHudActive() {
         right: 8,
         bottom: 8,
         zIndex: 9999,
-        maxHeight: "28vh",
+        maxHeight: "32vh",
         overflow: "auto",
         padding: "8px 10px",
         borderRadius: 8,
@@ -127,10 +140,44 @@ function VoiceDebugHudActive() {
         border: "1px solid rgba(159,239,195,0.25)",
       }}
     >
-      <div style={{ opacity: 0.7, marginBottom: 4 }}>
-        jarvis voiceDebug — console: __jarvisVoiceDiag()
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          marginBottom: 4,
+          pointerEvents: "auto",
+        }}
+      >
+        <div style={{ opacity: 0.7 }}>
+          jarvis voiceDebug — console: __jarvisVoiceDiag()
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            void speak(TEST_PHRASE);
+          }}
+          style={{
+            flexShrink: 0,
+            padding: "4px 8px",
+            borderRadius: 4,
+            border: "1px solid rgba(159,239,195,0.45)",
+            background: "rgba(12,28,22,0.95)",
+            color: "#9fefc3",
+            fontFamily: "inherit",
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: "0.04em",
+            cursor: "pointer",
+          }}
+        >
+          TEST JARVIS VOICE
+        </button>
       </div>
-      <div style={{ opacity: 0.85, marginBottom: 4 }}>{ttsLine}</div>
+      <div style={{ opacity: 0.9, marginBottom: 4, wordBreak: "break-word" }}>
+        {ttsLine}
+      </div>
       {lines.length === 0 && <div>(waiting for events)</div>}
       {lines.map((e, i) => (
         <div key={`${e.t}-${i}`}>
@@ -145,6 +192,7 @@ function VoiceDebugHudActive() {
 /**
  * Dev-only event strip for real-iPhone verification.
  * Visible only when ?voiceDebug=1 / localStorage.jarvisVoiceDebug=1.
+ * Never shown on normal production URL.
  */
 export function VoiceDebugHud() {
   const enabled = useSyncExternalStore(
