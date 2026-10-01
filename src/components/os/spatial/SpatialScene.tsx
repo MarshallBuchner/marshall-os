@@ -33,6 +33,31 @@ function usePrefersReducedMotion() {
   }, []);
 }
 
+/**
+ * Desktop-only: scale the Jarvis core group so it floats as a centerpiece
+ * (~55–65vh, capped ~720–760px) with negative space for surrounding modules.
+ * Does not change camera FOV. Mobile uses Canvas2D and never mounts this scene.
+ */
+// Outer soft disc in JarvisCircularCore is circleGeometry radius 2.55
+const CORE_WORLD_DIAMETER = 5.1;
+const HERO_CAM_Z = 3.7;
+const HERO_FOV_DEG = 36;
+
+function useDesktopCoreScale(): number {
+  const { size } = useThree();
+  return useMemo(() => {
+    // R3F `size` is CSS pixels of the canvas
+    const h = Math.max(1, size.height);
+    // Target on-screen diameter ≈ 60vh, hard-capped at 720px (MacBook-friendly)
+    const targetPx = Math.min(720, Math.max(460, h * 0.6));
+    const fraction = targetPx / h;
+    const worldH = 2 * HERO_CAM_Z * Math.tan((HERO_FOV_DEG * Math.PI) / 360);
+    const scale = (fraction * worldH) / CORE_WORLD_DIAMETER;
+    // scale=1 put outer disc at ~212vh (heavily cropped); land near 0.28–0.35
+    return THREE.MathUtils.clamp(scale, 0.26, 0.42);
+  }, [size.height]);
+}
+
 function cameraFor(mode: CameraMode) {
   switch (mode) {
     case "LISTENING":
@@ -188,13 +213,16 @@ function SceneContent({ reducedMotion }: { reducedMotion: boolean }) {
   // During transform freeze heavy module motion by hiding non-essential surfaces
   const freezeExtras = presence === "transforming" || presence === "returning";
   const humanoidSurfaceCap = presence === "humanoid";
+  const coreScale = useDesktopCoreScale();
 
   return (
     <>
       <EnvironmentRoom reducedMotion={reducedMotion} />
       <RoomDust reducedMotion={reducedMotion} density={freezeExtras ? 0.4 : 1} />
 
+      {/* Scale core+presence only — room/modules keep composition space around the centerpiece */}
       <group
+        scale={[coreScale, coreScale, coreScale]}
         onClick={(e) => {
           e.stopPropagation();
           setAwake(true);
@@ -218,45 +246,45 @@ function SceneContent({ reducedMotion }: { reducedMotion: boolean }) {
         />
       </group>
 
-      {!freezeExtras &&
-        systems.map((node) => {
-          const focused = focus?.kind === "system" && focusedId === node.id;
-          const associated = associatedSystemId === node.id;
-          const attention = node.status === "degraded";
-          let visible =
-            focused || associated || (attention && (inFocus || Boolean(activeCmd)));
-          // Humanoid: max 1–2 surfaces
-          if (humanoidSurfaceCap) {
-            visible = focused || associated;
-          }
-          return (
-            <GlassModule
-              key={node.id}
-              node={node}
-              focused={focused}
-              associated={associated}
-              visible={visible}
-              reducedMotion={reducedMotion}
-              onSelect={() => setFocus({ kind: "system", id: node.id })}
-            />
-          );
-        })}
-
-      {!freezeExtras &&
-        agents.map((node) => (
-          <AgentChip
+      {/* Keep modules mounted during transform — conditional unmount of <Html> caused removeChild */}
+      {systems.map((node) => {
+        const focused = focus?.kind === "system" && focusedId === node.id;
+        const associated = associatedSystemId === node.id;
+        const attention = node.status === "degraded";
+        let visible =
+          focused || associated || (attention && (inFocus || Boolean(activeCmd)));
+        if (freezeExtras) visible = false;
+        // Humanoid: max 1–2 surfaces
+        if (humanoidSurfaceCap) {
+          visible = focused || associated;
+        }
+        return (
+          <GlassModule
             key={node.id}
             node={node}
-            focused={focus?.kind === "agent" && focusedId === node.id}
-            associated={associatedAgentId === node.id}
+            focused={focused && !freezeExtras}
+            associated={associated && !freezeExtras}
+            visible={visible}
             reducedMotion={reducedMotion}
-            onSelect={() => setFocus({ kind: "agent", id: node.id })}
+            onSelect={() => setFocus({ kind: "system", id: node.id })}
           />
-        ))}
+        );
+      })}
 
-      {associatedSystem && associatedAgent && !freezeExtras && (
+      {agents.map((node) => (
+        <AgentChip
+          key={node.id}
+          node={node}
+          focused={!freezeExtras && focus?.kind === "agent" && focusedId === node.id}
+          associated={!freezeExtras && associatedAgentId === node.id}
+          reducedMotion={reducedMotion}
+          onSelect={() => setFocus({ kind: "agent", id: node.id })}
+        />
+      ))}
+
+      {associatedSystem && associatedAgent && (
         <RoutePulse
-          active={Boolean(activeCmd) && camMode !== "HERO"}
+          active={!freezeExtras && Boolean(activeCmd) && camMode !== "HERO"}
           from={dissolving ? [0, 0.5, 0.1] : [0, 0.1, 0.15]}
           to={
             focus?.kind === "system" && focus.id === associatedSystem.id

@@ -316,10 +316,15 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
           setListening(true);
           setVoiceError(null);
         } else if (resume.reason === "ios-needs-gesture" || isIosWebKit()) {
+          // End session so the next mic tap starts a new turn (not stopListening)
           setListening(false);
+          setVoiceSessionActive(false);
+          stt.setSessionActive(false);
           setVoiceError("Tap mic to continue listening.");
         } else if (resume.attempted && !resume.ok) {
           setListening(false);
+          setVoiceSessionActive(false);
+          stt.setSessionActive(false);
           setVoiceError("Tap mic to continue listening.");
         }
       }
@@ -354,7 +359,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  /** User-facing transform: short ack → action → "Presence online." (via clock) */
+  /** User-facing transform: start morph immediately; speak ack in parallel (TTS must not stall). */
   const beginTransform = useCallback(() => {
     if (
       presenceRef.current === "humanoid" ||
@@ -362,21 +367,17 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     ) {
       return;
     }
-    void (async () => {
-      await speak(jarvisPhraseFor("transform_ack"));
-      startTransformPresence();
-    })();
+    startTransformPresence();
+    void speak(jarvisPhraseFor("transform_ack"));
   }, [speak, startTransformPresence]);
 
-  /** User-facing return: "Returning." → action → "Core online." (via clock) */
+  /** User-facing return: start morph immediately; speak in parallel (TTS must not stall). */
   const returnToCore = useCallback(() => {
     if (presenceRef.current === "core" || presenceRef.current === "returning") {
       return;
     }
-    void (async () => {
-      await speak(jarvisPhraseFor("returning"));
-      startReturnPresence();
-    })();
+    startReturnPresence();
+    void speak(jarvisPhraseFor("returning"));
   }, [speak, startReturnPresence]);
 
   // Drive experience clock from presence transitions
@@ -444,6 +445,10 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
 
       // Local presence / show intents — shared with voice path (same pipeline entry)
       const voiceIntent = parseVoiceIntent(trimmed);
+      if (voiceIntent.kind === "WAKE_ONLY") {
+        void speak(jarvisPhraseFor("wake_ack"));
+        return null;
+      }
       if (voiceIntent.kind === "TRANSFORM_HUMANOID") {
         beginTransform();
         return null;
@@ -611,6 +616,11 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
       lastInterimRef.current = { text: "", since: 0 };
 
       // Same handlers as typed submit — no approval/safety bypass
+      if (intent.kind === "WAKE_ONLY") {
+        // iOS often cuts after wake — keep session, optional ack, do not POST
+        void speak(jarvisPhraseFor("wake_ack"));
+        return;
+      }
       if (intent.kind === "TRANSFORM_HUMANOID") {
         beginTransform();
         return;
@@ -637,7 +647,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
         void submit(intent.displayText || display);
       }
     },
-    [beginTransform, returnToCore, resolve, submit],
+    [beginTransform, returnToCore, resolve, submit, speak],
   );
 
   useEffect(() => {
@@ -649,6 +659,7 @@ export function JarvisProvider({ children }: { children: ReactNode }) {
     setVoiceSessionActive(false);
     setListening(false);
     setAudioLevel(0);
+    setVoiceError(null);
     pendingTranscript.current = "";
     finalTranscript.current = "";
     lastInterimRef.current = { text: "", since: 0 };

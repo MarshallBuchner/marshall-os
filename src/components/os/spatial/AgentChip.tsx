@@ -60,7 +60,8 @@ export function AgentChip({
 
     const lerp = reducedMotion ? 1 : 1 - Math.exp(-dt * 5.5);
     group.current.position.lerp(target, lerp);
-    group.current.visible = show || group.current.scale.x > 0.05;
+    // Keep Object3D visible so drei <Html> portals are not torn down (removeChild glitch)
+    group.current.visible = true;
 
     const camPos = camera.position.clone();
     camPos.y = group.current.position.y;

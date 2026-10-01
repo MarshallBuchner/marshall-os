@@ -1,16 +1,19 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import {
-  getVoiceDiagLog,
+  getVoiceDiagSnapshot,
+  getVoiceDiagVersion,
   isVoiceDebugEnabled,
+  peekVoiceDebugEnabled,
   type VoiceDiagEntry,
 } from "@/lib/voice/voiceDiagnostics";
+import { getTtsVoiceDebug } from "@/lib/voice/speechSynthesis";
 
 function subscribeDiag(cb: () => void) {
   if (typeof window === "undefined") return () => {};
   window.addEventListener("jarvis-voice-diag", cb);
-  const id = window.setInterval(cb, 500);
+  const id = window.setInterval(cb, 1000);
   return () => {
     window.removeEventListener("jarvis-voice-diag", cb);
     window.clearInterval(id);
@@ -18,17 +21,85 @@ function subscribeDiag(cb: () => void) {
 }
 
 function getDiagSnapshot(): VoiceDiagEntry[] {
-  return getVoiceDiagLog().slice(-12);
+  void getVoiceDiagVersion();
+  return getVoiceDiagSnapshot(12);
 }
 
-function getServerSnapshot(): VoiceDiagEntry[] {
-  return [];
+const EMPTY_SNAP: VoiceDiagEntry[] = [];
+
+function getServerDiagSnapshot(): VoiceDiagEntry[] {
+  return EMPTY_SNAP;
+}
+
+function subscribeDebugFlag(cb: () => void) {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("storage", cb);
+  return () => window.removeEventListener("storage", cb);
+}
+
+function getDebugFlagSnapshot(): boolean {
+  try {
+    return peekVoiceDebugEnabled();
+  } catch {
+    return false;
+  }
+}
+
+function getServerDebugFlagSnapshot(): boolean {
+  return false;
+}
+
+function subscribeTtsVoice(cb: () => void) {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("jarvis-voice-diag", cb);
+  try {
+    window.speechSynthesis?.addEventListener?.("voiceschanged", cb);
+  } catch {
+    /* ignore */
+  }
+  const id = window.setInterval(cb, 1500);
+  return () => {
+    window.removeEventListener("jarvis-voice-diag", cb);
+    try {
+      window.speechSynthesis?.removeEventListener?.("voiceschanged", cb);
+    } catch {
+      /* ignore */
+    }
+    window.clearInterval(id);
+  };
+}
+
+let cachedTtsLabel = "TTS voice · (pending)";
+
+function getTtsLabelSnapshot(): string {
+  try {
+    const v = getTtsVoiceDebug();
+    const label = `TTS voice · ${v.name} · ${v.lang} · rate=${v.rate} pitch=${v.pitch}`;
+    if (label !== cachedTtsLabel) cachedTtsLabel = label;
+    return cachedTtsLabel;
+  } catch {
+    return cachedTtsLabel;
+  }
+}
+
+function getServerTtsLabelSnapshot(): string {
+  return "TTS voice · (pending)";
 }
 
 function VoiceDebugHudActive() {
-  const lines = useSyncExternalStore(subscribeDiag, getDiagSnapshot, getServerSnapshot);
+  const lines = useSyncExternalStore(subscribeDiag, getDiagSnapshot, getServerDiagSnapshot);
+  const ttsLine = useSyncExternalStore(
+    subscribeTtsVoice,
+    getTtsLabelSnapshot,
+    getServerTtsLabelSnapshot,
+  );
 
   useEffect(() => {
+    try {
+      void isVoiceDebugEnabled();
+    } catch {
+      /* ignore */
+    }
     void import("@/lib/voice/voiceDiagnostics").then((m) => m.installVoiceDiagGlobals());
   }, []);
 
@@ -59,6 +130,7 @@ function VoiceDebugHudActive() {
       <div style={{ opacity: 0.7, marginBottom: 4 }}>
         jarvis voiceDebug — console: __jarvisVoiceDiag()
       </div>
+      <div style={{ opacity: 0.85, marginBottom: 4 }}>{ttsLine}</div>
       {lines.length === 0 && <div>(waiting for events)</div>}
       {lines.map((e, i) => (
         <div key={`${e.t}-${i}`}>
@@ -73,11 +145,12 @@ function VoiceDebugHudActive() {
 /**
  * Dev-only event strip for real-iPhone verification.
  * Visible only when ?voiceDebug=1 / localStorage.jarvisVoiceDebug=1.
- * When debug is off (normal production), mounts nothing — no window/subscribe work.
  */
 export function VoiceDebugHud() {
-  const [enabled] = useState(() =>
-    typeof window !== "undefined" ? isVoiceDebugEnabled() : false,
+  const enabled = useSyncExternalStore(
+    subscribeDebugFlag,
+    getDebugFlagSnapshot,
+    getServerDebugFlagSnapshot,
   );
 
   if (!enabled) return null;

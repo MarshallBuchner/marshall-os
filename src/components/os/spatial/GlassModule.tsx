@@ -110,7 +110,8 @@ export function GlassModule({
 
     const lerp = reducedMotion ? 1 : 1 - Math.exp(-dt * 6);
     group.current.position.lerp(target, lerp);
-    group.current.visible = show || group.current.position.distanceTo(target) > 0.05;
+    // Keep Object3D visible so drei <Html> portals are not torn down (removeChild glitch)
+    group.current.visible = true;
 
     const camPos = camera.position.clone();
     camPos.y = group.current.position.y;
@@ -181,7 +182,13 @@ export function GlassModule({
           opacity={focused ? 0.95 : isAttention ? 0.85 : 0.35}
         />
       </lineSegments>
-      <Html center style={{ pointerEvents: "auto" }}>
+      <Html
+        center
+        style={{
+          pointerEvents: visible || focused || associated ? "auto" : "none",
+          opacity: visible || focused || associated ? 1 : 0,
+        }}
+      >
         <button
           type="button"
           aria-label={`Focus ${node.label}`}

@@ -201,9 +201,9 @@ export function JarvisCore2D({
         });
       }
 
-      // Composition scale — moderately larger humanoid, leave ask UI room
-      const baseScale = R * (0.82 + humanoidAmt * 0.16);
-      const yBias = humanoidAmt * R * 0.08;
+      // Fit humanoid in frame: shrink + shift down while morphing so cranium stays on-canvas
+      const baseScale = R * (0.82 - humanoidAmt * 0.14);
+      const yBias = humanoidAmt * R * 0.22;
       const persp = 2.45;
 
       // Precompute RGB once per accent

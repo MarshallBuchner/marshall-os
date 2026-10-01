@@ -12,6 +12,7 @@ export type VoiceUiIntentKind =
   | "SHOW_SYSTEM"
   | "APPROVE"
   | "REJECT"
+  | "WAKE_ONLY"
   | "PIPELINE";
 
 export type VoiceUiIntent =
@@ -26,6 +27,7 @@ export type VoiceUiIntent =
     }
   | { kind: "APPROVE"; confidence: number; normalized: string }
   | { kind: "REJECT"; confidence: number; normalized: string }
+  | { kind: "WAKE_ONLY"; confidence: number; normalized: string }
   | { kind: "PIPELINE"; confidence: number; normalized: string; displayText: string };
 
 /** Non-destructive UI intents may resolve from stable interim transcripts */
@@ -37,26 +39,33 @@ export function isNonDestructiveVoiceIntent(kind: VoiceUiIntentKind): boolean {
   );
 }
 
+/** STT often hears "core" as car/court/corps in return phrases */
+const CORE_TOKEN = "(?:core|car|court|corps)";
+
 const TRANSFORM_PATTERNS: RegExp[] = [
-  /\btransform(?:ing)?\s+into\s+human(?:\s+form)?\b/,
-  /\btransform(?:ing)?\s+to\s+human(?:\s+form)?\b/,
-  /\bbecome\s+human(?:\s+form)?\b/,
+  // "transformed into a human", "transform into human form", "turn into a humanoid"
+  /\b(?:transform(?:ed|s|ing)?|turn(?:ed)?)\s+(?:in(?:to)?|to)\s+(?:an?\s+)?human(?:oid)?(?:\s+form|\s+being)?\b/,
+  /\btransform(?:ing|ed)?\s+into\s+human(?:\s+form)?\b/,
+  /\btransform(?:ing|ed)?\s+to\s+human(?:\s+form)?\b/,
+  /\btake\s+(?:on\s+)?(?:an?\s+)?human(?:oid)?\s+form\b/,
+  /\bbecome\s+(?:an?\s+)?human(?:oid)?(?:\s+form)?\b/,
   /\bhuman\s+form\b/,
   /\bshow\s+(?:me\s+)?(?:your\s+)?(?:human|humanoid)\s+(?:form|self|presence)?\b/,
-  /\bappear\s+as\s+human\b/,
+  /\bappear\s+as\s+(?:an?\s+)?human(?:oid)?\b/,
   /\bshow\s+yourself\b/,
   /\bhumanoid\s+(?:form|mode|presence)\b/,
   /\benter\s+human(?:oid)?\s+(?:form|mode)\b/,
 ];
 
 const RETURN_PATTERNS: RegExp[] = [
-  /\breturn\s+to\s+(?:the\s+)?(?:jarvis\s+)?core\b/,
-  /\bback\s+to\s+(?:the\s+)?(?:jarvis\s+)?core\b/,
-  /\bdismiss\s+(?:the\s+)?(?:presence|humanoid|human\s+form)\b/,
-  /\bgo\s+back\s+to\s+(?:the\s+)?core\b/,
-  /\brevert\s+to\s+core\b/,
-  /\bexit\s+human(?:oid)?\s+(?:form|mode)\b/,
-  /\bcollapse\s+(?:to\s+)?core\b/,
+  new RegExp(`\\breturn\\s+to\\s+(?:the\\s+)?(?:jarvis\\s+)?${CORE_TOKEN}\\b`),
+  new RegExp(`\\bback\\s+to\\s+(?:the\\s+)?(?:jarvis\\s+)?${CORE_TOKEN}\\b`),
+  new RegExp(`\\bgo\\s+back\\s+to\\s+(?:the\\s+)?${CORE_TOKEN}\\b`),
+  new RegExp(`\\brevert\\s+to\\s+(?:the\\s+)?${CORE_TOKEN}\\b`),
+  new RegExp(`\\bcollapse\\s+(?:to\\s+)?${CORE_TOKEN}\\b`),
+  /\bdismiss\s+(?:the\s+)?(?:presence|humanoid|human(?:oid)?\s+form)\b/,
+  /\bexit\s+(?:the\s+)?human(?:oid)?\s+(?:form|mode)\b/,
+  /\bexit\s+humanoid\s+mode\b/,
 ];
 
 const APPROVE_PATTERNS: RegExp[] = [
@@ -97,7 +106,7 @@ function detectShowSystem(normalized: string): { projectId: string; display: str
 
 /**
  * Parse a (possibly already normalized) transcript into a voice UI intent.
- * Consequential actions (approve/reject/pipeline) should only run on finalized results.
+ * RETURN is checked before TRANSFORM so "exit human form" is not swallowed.
  */
 export function parseVoiceIntent(rawOrNormalized: string): VoiceUiIntent {
   const normalized = normalizeTranscript(rawOrNormalized);
@@ -105,11 +114,18 @@ export function parseVoiceIntent(rawOrNormalized: string): VoiceUiIntent {
     return { kind: "PIPELINE", confidence: 0, normalized: "", displayText: "" };
   }
 
-  if (TRANSFORM_PATTERNS.some((re) => re.test(normalized))) {
-    return { kind: "TRANSFORM_HUMANOID", confidence: 0.92, normalized };
+  // Bare wake after normalize strips "jarvis " — empty means wake-only, or raw was only jarvis
+  const rawNorm = (rawOrNormalized ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (/^(hey\s+)?jarvis[.!?]*$/.test(rawNorm) || normalized === "jarvis") {
+    return { kind: "WAKE_ONLY", confidence: 0.95, normalized: "jarvis" };
   }
+
+  // Return BEFORE transform — "exit/dismiss human form" must not match TRANSFORM
   if (RETURN_PATTERNS.some((re) => re.test(normalized))) {
     return { kind: "RETURN_TO_CORE", confidence: 0.92, normalized };
+  }
+  if (TRANSFORM_PATTERNS.some((re) => re.test(normalized))) {
+    return { kind: "TRANSFORM_HUMANOID", confidence: 0.92, normalized };
   }
 
   const show = detectShowSystem(normalized);

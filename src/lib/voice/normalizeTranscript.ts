@@ -15,6 +15,7 @@ export function normalizeTranscript(raw: string): string {
   if (!s) return "";
 
   // Optional wake phrasing (explicit mic session — not always-on wake word)
+  // Keep bare "jarvis" intact for WAKE_ONLY; strip when followed by a command.
   s = s.replace(/^(hey\s+)?jarvis\s+/, "");
 
   // Trailing / leading politeness

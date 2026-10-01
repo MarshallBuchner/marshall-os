@@ -19,6 +19,7 @@ export type VoiceDiagEvent =
   | "TTS_START"
   | "TTS_END"
   | "TTS_CANCEL"
+  | "TTS_VOICE"
   | "STT_PAUSE_FOR_TTS"
   | "STT_RESTART_REQUESTED"
   | "STT_RESTART_SUCCESS"
@@ -36,6 +37,32 @@ export type VoiceDiagEntry = {
 const MAX = 200;
 const buffer: VoiceDiagEntry[] = [];
 let enabledCache: boolean | null = null;
+/** Bumped whenever the log changes — stabilizes useSyncExternalStore snapshots */
+let diagVersion = 0;
+let cachedSnapshot: VoiceDiagEntry[] = [];
+let cachedSnapshotVersion = -1;
+
+function bumpDiagVersion() {
+  diagVersion += 1;
+}
+
+export function getVoiceDiagVersion(): number {
+  return diagVersion;
+}
+
+/** Pure read for useSyncExternalStore — no localStorage writes. */
+export function peekVoiceDebugEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  if (enabledCache != null) return enabledCache;
+  try {
+    const q = new URLSearchParams(window.location.search).get("voiceDebug");
+    if (q === "1" || q === "true") return true;
+    if (q === "0" || q === "false") return false;
+    return localStorage.getItem("jarvisVoiceDebug") === "1";
+  } catch {
+    return false;
+  }
+}
 
 export function isVoiceDebugEnabled(): boolean {
   if (typeof window === "undefined") return false;
@@ -44,12 +71,20 @@ export function isVoiceDebugEnabled(): boolean {
     const q = new URLSearchParams(window.location.search).get("voiceDebug");
     if (q === "1" || q === "true") {
       enabledCache = true;
-      localStorage.setItem("jarvisVoiceDebug", "1");
+      try {
+        localStorage.setItem("jarvisVoiceDebug", "1");
+      } catch {
+        /* ignore */
+      }
       return true;
     }
     if (q === "0" || q === "false") {
       enabledCache = false;
-      localStorage.setItem("jarvisVoiceDebug", "0");
+      try {
+        localStorage.setItem("jarvisVoiceDebug", "0");
+      } catch {
+        /* ignore */
+      }
       return false;
     }
     enabledCache = localStorage.getItem("jarvisVoiceDebug") === "1";
@@ -71,6 +106,7 @@ export function voiceDiag(event: VoiceDiagEvent, detail?: string) {
   };
   buffer.push(entry);
   if (buffer.length > MAX) buffer.shift();
+  bumpDiagVersion();
   console.info(`[jarvis-voice] ${event}${detail ? ` | ${detail}` : ""}`);
   try {
     window.dispatchEvent(new CustomEvent("jarvis-voice-diag", { detail: entry }));
@@ -83,14 +119,26 @@ export function getVoiceDiagLog(): VoiceDiagEntry[] {
   return [...buffer];
 }
 
+/** Stable snapshot for useSyncExternalStore — same array ref until version bumps */
+export function getVoiceDiagSnapshot(limit = 12): VoiceDiagEntry[] {
+  if (cachedSnapshotVersion !== diagVersion) {
+    cachedSnapshot = buffer.slice(-limit);
+    cachedSnapshotVersion = diagVersion;
+  }
+  return cachedSnapshot;
+}
+
 export function clearVoiceDiagLog() {
   buffer.length = 0;
+  bumpDiagVersion();
 }
 
 export function isIosWebKit(): boolean {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent || "";
-  const iOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const iOS =
+    /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const webkit = /WebKit/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
   return iOS && (webkit || /Safari/.test(ua) || /iPhone|iPad/.test(ua));
 }

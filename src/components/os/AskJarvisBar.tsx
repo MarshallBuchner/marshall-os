@@ -79,14 +79,16 @@ export function AskJarvisBar({ showPrompt = true, cinematic = true }: Props) {
           aria-label={
             !voiceInputAvailable
               ? "Voice input not available"
-              : voiceSessionActive || listening
+              : listening
                 ? "Stop voice session"
                 : "Start voice session"
           }
-          aria-pressed={listening || voiceSessionActive}
+          aria-pressed={listening}
           onClick={() => {
             if (!voiceInputAvailable) return;
-            if (listening || voiceSessionActive) stopListening();
+            // Use listening only — after TTS continue prompt, session may be inactive
+            // and a single tap must start the next turn (not stopListening).
+            if (listening) stopListening();
             else void startListening();
           }}
         >
