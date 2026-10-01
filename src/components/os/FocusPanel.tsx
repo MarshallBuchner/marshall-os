@@ -20,11 +20,11 @@ export function FocusPanel() {
       <aside className="glass hidden h-full flex-col p-4 lg:flex">
         <h2 className="display-font text-[11px] text-[var(--electric)]">CONTEXT</h2>
         <p className="mt-3 text-sm text-[var(--text-muted)]">
-          Approach a module to bring it into reading position. Jarvis inhabits the room —
-          detail and metrics stay here.
+          Jarvis is waiting. Ask a question, use the mic, or open a system when routed.
+          Detail stays here — not in the core.
         </p>
         <p className="mt-4 mono text-[10px] text-[var(--text-muted)]">
-          Spatial = presence · DOM = readable command surface
+          Spatial = presence · DOM = readable detail
         </p>
       </aside>
     );

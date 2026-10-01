@@ -1,17 +1,16 @@
 "use client";
 
-import { StatusStrip } from "@/components/os/StatusStrip";
-import { CommandConsole } from "@/components/os/CommandConsole";
 import { SpatialCore } from "@/components/os/spatial/SpatialCore";
-import { FocusPanel } from "@/components/os/FocusPanel";
-import { AttentionBoard } from "@/components/os/AttentionBoard";
-import { SystemActivity } from "@/components/os/SystemActivity";
-import { CommandAudit } from "@/components/os/CommandAudit";
+import { AskJarvisBar } from "@/components/os/AskJarvisBar";
+import { MinimalStatus } from "@/components/os/MinimalStatus";
+import { ContextualDrawer } from "@/components/os/ContextualDrawer";
 import { MobileRemote } from "@/components/os/MobileRemote";
-import { ApprovalCenter } from "@/components/jarvis/ApprovalCenter";
-import { useJarvis } from "@/components/jarvis/JarvisProvider";
 import type { ActivityEvent, Project } from "@/types";
 
+/**
+ * Clean Overview home — Marshall // OS, Jarvis core, ask, minimal status.
+ * Attention / Activity / Audit / Approvals appear on demand only.
+ */
 export function CommandEnvironment({
   projects,
   systemsOnline,
@@ -21,41 +20,38 @@ export function CommandEnvironment({
   systemsOnline: number;
   activitySeed: ActivityEvent[];
 }) {
-  const { focus } = useJarvis();
-
   return (
-    <div className="space-y-4 md:space-y-5">
-      <StatusStrip projects={projects} systemsOnline={systemsOnline} />
-
-      {/* Mobile: Jarvis remote — no giant 3D topology */}
+    <div className="jarvis-home">
+      {/* Mobile practical remote */}
       <MobileRemote activitySeed={activitySeed} />
 
-      {/* Desktop / tablet */}
-      <div className="hidden space-y-5 lg:block">
-        <CommandConsole />
+      {/* Desktop: one composition — JARVIS is the interface */}
+      <div className="hidden lg:block">
+        <header className="mb-2 text-center">
+          <h1 className="display-font text-sm tracking-[0.28em] text-[var(--electric)] md:text-base">
+            MARSHALL // OS
+          </h1>
+          <p className="mt-1 mono text-[10px] text-[var(--text-muted)]">
+            PERSONAL AI OPERATING ENVIRONMENT
+          </p>
+        </header>
 
-        {/* Immersive spatial window + DOM context panel */}
-        <div
-          className={`spatial-stage grid gap-0 overflow-hidden border border-[var(--border)] bg-[rgba(2,4,10,0.4)] transition-[grid-template-columns] duration-500 ${
-            focus ? "xl:grid-cols-[minmax(0,1fr)_320px]" : "xl:grid-cols-[minmax(0,1fr)_280px]"
-          }`}
-        >
+        <div className="mb-3">
+          <MinimalStatus
+            systemsOnline={systemsOnline}
+            totalSystems={projects.length}
+          />
+        </div>
+
+        <div className="jarvis-hero-stage relative overflow-hidden border border-[var(--border)] bg-[rgba(2,4,10,0.5)]">
           <SpatialCore />
-          <div className="border-l border-[var(--border)] bg-[rgba(6,10,20,0.72)] backdrop-blur-md">
-            <FocusPanel />
+          <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-[rgba(2,5,10,0.95)] via-[rgba(2,5,10,0.75)] to-transparent pb-5 pt-24">
+            <AskJarvisBar />
           </div>
         </div>
-
-        <div className="grid gap-4 lg:grid-cols-2" id="system-activity">
-          <AttentionBoard />
-          <SystemActivity seed={activitySeed} />
-        </div>
-
-        <CommandAudit />
-        <ApprovalCenter />
       </div>
 
-      <div className="lg:hidden">{focus && <FocusPanel />}</div>
+      <ContextualDrawer activitySeed={activitySeed} />
     </div>
   );
 }

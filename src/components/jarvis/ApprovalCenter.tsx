@@ -10,12 +10,17 @@ export function ApprovalCenter() {
   const history = approvals.filter((a) => a.status !== "pending").slice(0, 5);
 
   return (
-    <section className="glass mt-6 p-4 md:p-5" id="approval-center">
+    <section
+      className="glass p-4 md:p-5"
+      id="approval-center"
+      role="region"
+      aria-label="Approval center"
+    >
       <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
         <div>
           <h2 className="display-font text-[11px] text-[var(--electric)]">APPROVAL CENTER</h2>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Simulated state machine only — Approve/Cancel never claims live execution.
+            L1–L4 permission gate — Approve/Cancel is simulated only. Never bypasses policy.
           </p>
         </div>
         <span className="badge-demo">DEMO / SIMULATED</span>
@@ -63,6 +68,7 @@ export function ApprovalCenter() {
                     type="button"
                     className="btn-primary"
                     disabled={busy}
+                    aria-label={`Approve ${a.actionLabel}`}
                     onClick={() => void resolve(a.id, "approved")}
                   >
                     Approve
@@ -71,9 +77,10 @@ export function ApprovalCenter() {
                     type="button"
                     className="btn-danger"
                     disabled={busy}
+                    aria-label={`Cancel ${a.actionLabel}`}
                     onClick={() => void resolve(a.id, "rejected")}
                   >
-                    Reject
+                    Cancel
                   </button>
                 </div>
               </div>

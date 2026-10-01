@@ -1,9 +1,6 @@
 /**
- * Spatial layout — cinematic room placements (not orbital).
- * Registry-driven systems/agents only.
- *
- * Composition: shallow theatrical arc with FG / MG / BG depth.
- * Modules rest distant & subdued; focus brings one to FOCUS_SLOT.
+ * Contextual spatial placements — modules appear when focused/routed.
+ * Not permanent orbits around Jarvis.
  */
 
 import {
@@ -15,11 +12,11 @@ import {
 
 export type Vec3 = [number, number, number];
 
-/** Primary reading slot — approached module settles here */
-export const FOCUS_SLOT: Vec3 = [-0.2, 0.15, 1.35];
+/** Reading slot — approached module settles here (right of core) */
+export const FOCUS_SLOT: Vec3 = [1.55, 0.2, 1.1];
 
-/** Jarvis volumetric presence — mid-depth, slightly elevated, not a centered logo */
-export const JARVIS_PRESENCE: Vec3 = [0.15, 0.85, -2.4];
+/** Jarvis circular core sits at scene origin (slightly forward) */
+export const JARVIS_CORE: Vec3 = [0, 0.1, 0.2];
 
 export type SpatialSystemNode = OrbitSystemNode & {
   restPosition: Vec3;
@@ -31,35 +28,28 @@ export type SpatialAgentNode = AgentOrbitNode & {
   restPosition: Vec3;
 };
 
-/**
- * Theatrical placements — approachable glass surfaces, not orbit nodes.
- * Depth bands: FG (~z 0.4), MG (~z -0.8), BG (~z -2.2)
- */
+/** Resting hold positions — off to the sides/back when contextual */
 const SYSTEM_REST: Record<string, { pos: Vec3; scale: number }> = {
-  // Mid-left / mid-right — primary systems (more approachable)
-  powr: { pos: [-1.85, 0.2, -0.55], scale: 0.92 },
-  quantlab: { pos: [1.75, 0.25, -0.45], scale: 0.95 },
-  // Lower FG accents
-  northstar: { pos: [-1.05, -0.35, 0.25], scale: 0.88 },
-  // Back / sides — quieter
-  "build-lab": { pos: [2.45, 0.05, -1.55], scale: 0.82 },
-  personal: { pos: [0.55, -0.4, -1.85], scale: 0.8 },
-  github: { pos: [-0.35, 0.1, -2.75], scale: 0.75 },
+  powr: { pos: [-2.4, 0.35, -1.2], scale: 0.72 },
+  quantlab: { pos: [2.35, 0.3, -1.0], scale: 0.75 },
+  northstar: { pos: [-1.9, -0.2, -1.6], scale: 0.7 },
+  "build-lab": { pos: [2.6, -0.15, -1.8], scale: 0.68 },
+  personal: { pos: [1.4, -0.45, -2.1], scale: 0.65 },
+  github: { pos: [-0.9, 0.4, -2.4], scale: 0.62 },
 };
 
-/** Agents inhabit upper air — secondary chips, not beads on a ring */
 const AGENT_REST: Record<string, Vec3> = {
-  openai: [-2.15, 1.35, -2.05],
-  cursor: [1.55, 1.25, -1.75],
-  claude: [-0.65, 1.55, -2.55],
-  grok: [2.35, 1.15, -2.35],
+  openai: [-2.0, 1.3, -1.8],
+  cursor: [2.0, 1.2, -1.5],
+  claude: [-1.2, 1.45, -2.2],
+  grok: [1.6, 1.1, -2.0],
 };
 
 export function getSpatialSystems(): SpatialSystemNode[] {
   return SYSTEM_ORBIT.map((node) => {
-    const rest = SYSTEM_REST[node.id] ?? { pos: [0, 0, -1.5] as Vec3, scale: 0.85 };
+    const rest = SYSTEM_REST[node.id] ?? { pos: [0, 0, -2] as Vec3, scale: 0.7 };
     const dormancy =
-      node.status === "not_configured" || node.status === "offline" ? 0.22 : 0.55;
+      node.status === "not_configured" || node.status === "offline" ? 0.2 : 0.5;
     return {
       ...node,
       restPosition: rest.pos,

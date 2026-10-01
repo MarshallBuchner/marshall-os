@@ -10,23 +10,21 @@ type Props = {
   node: SpatialAgentNode;
   focused: boolean;
   associated: boolean;
-  dimmed: boolean;
   reducedMotion: boolean;
   onSelect: () => void;
 };
 
-/** Quiet agent surfaces — secondary glass chips in upper air */
+/** Agent chip — only when associated/focused (contextual routing) */
 export function AgentChip({
   node,
   focused,
   associated,
-  dimmed,
   reducedMotion,
   onSelect,
 }: Props) {
   const group = useRef<THREE.Group>(null);
   const { camera } = useThree();
-  const bodyGeo = useMemo(() => new THREE.BoxGeometry(0.72, 0.36, 0.028), []);
+  const bodyGeo = useMemo(() => new THREE.BoxGeometry(0.7, 0.34, 0.028), []);
   const edgeGeo = useMemo(() => new THREE.EdgesGeometry(bodyGeo), [bodyGeo]);
 
   const faceTex = useMemo(() => {
@@ -49,75 +47,61 @@ export function AgentChip({
     return tex;
   }, [node.label, node.role]);
 
+  const show = focused || associated;
+
   useFrame((_, dt) => {
     if (!group.current) return;
-    const target = new THREE.Vector3(...node.restPosition);
-    if (associated && !focused) {
-      target.y -= 0.12;
-      target.z += 0.55;
-    }
-    if (focused) {
-      target.set(1.05, 0.45, 1.35);
-    }
-    const lerp = reducedMotion ? 1 : 1 - Math.exp(-dt * 5.2);
+    const target = focused
+      ? new THREE.Vector3(1.55, 1.05, 1.0)
+      : associated
+        ? new THREE.Vector3(1.35, 0.95, 0.55)
+        : new THREE.Vector3(...node.restPosition);
+    if (!show) target.set(2.5, 2, -3);
+
+    const lerp = reducedMotion ? 1 : 1 - Math.exp(-dt * 5.5);
     group.current.position.lerp(target, lerp);
+    group.current.visible = show || group.current.scale.x > 0.05;
 
     const camPos = camera.position.clone();
     camPos.y = group.current.position.y;
     group.current.lookAt(camPos);
 
-    const scaleTarget = focused ? 1.15 : associated ? 1.05 : 0.92;
-    const s = THREE.MathUtils.lerp(group.current.scale.x, scaleTarget, lerp);
-    group.current.scale.setScalar(s);
+    const scaleTarget = show ? (focused ? 1.1 : 1) : 0.01;
+    const s = THREE.MathUtils.lerp(group.current.scale.x || 0.01, scaleTarget, lerp);
+    group.current.scale.setScalar(Math.max(0.01, s));
   });
-
-  const opacity = dimmed ? 0.08 : focused || associated ? 0.9 : 0.35;
 
   return (
     <group
       ref={group}
       position={node.restPosition}
-      scale={0.92}
+      scale={0.01}
       onClick={(e) => {
+        if (!show) return;
         e.stopPropagation();
         onSelect();
-      }}
-      onPointerOver={() => {
-        document.body.style.cursor = "pointer";
-      }}
-      onPointerOut={() => {
-        document.body.style.cursor = "auto";
       }}
     >
       <mesh geometry={bodyGeo}>
         <meshPhysicalMaterial
           color="#0a1520"
           emissive="#38bdf8"
-          emissiveIntensity={focused || associated ? 0.22 : 0.04}
+          emissiveIntensity={associated || focused ? 0.25 : 0.05}
           transmission={0.35}
           roughness={0.22}
           transparent
-          opacity={opacity}
+          opacity={show ? 0.9 : 0.05}
           thickness={0.2}
         />
       </mesh>
       <mesh position={[0, 0, 0.016]}>
-        <planeGeometry args={[0.66, 0.32]} />
-        <meshBasicMaterial
-          map={faceTex}
-          transparent
-          opacity={dimmed ? 0.1 : focused || associated ? 0.92 : 0.55}
-          depthWrite={false}
-        />
+        <planeGeometry args={[0.64, 0.3]} />
+        <meshBasicMaterial map={faceTex} transparent opacity={show ? 0.92 : 0.05} depthWrite={false} />
       </mesh>
       <lineSegments geometry={edgeGeo}>
-        <lineBasicMaterial
-          color="#7dd3fc"
-          transparent
-          opacity={dimmed ? 0.06 : focused || associated ? 0.75 : 0.22}
-        />
+        <lineBasicMaterial color="#7dd3fc" transparent opacity={show ? 0.7 : 0.05} />
       </lineSegments>
-      <Html center style={{ pointerEvents: "auto" }}>
+      <Html center style={{ pointerEvents: show ? "auto" : "none" }}>
         <button
           type="button"
           aria-label={`Focus agent ${node.label}`}
@@ -128,12 +112,11 @@ export function AgentChip({
             onSelect();
           }}
           style={{
-            width: 72,
-            height: 36,
+            width: 64,
+            height: 32,
             opacity: 0,
             border: 0,
             padding: 0,
-            cursor: "pointer",
             background: "transparent",
           }}
         />

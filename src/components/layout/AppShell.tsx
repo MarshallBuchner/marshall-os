@@ -22,8 +22,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         )}
         <footer className="border-t border-[var(--border)] px-4 py-3 text-center mono text-[10px] text-[var(--text-muted)]">
-          MARSHALL OS V0.2 · DEMO_MODE · JARVIS operating layer (simulated) · No live trading · No
-          L4 execution · Adapters not configured
+          MARSHALL OS · DEMO_MODE · JARVIS layer (simulated) · Voice LOCAL browser only · No live
+          trading · No L4 · Adapters NOT CONFIGURED
         </footer>
       </div>
     </JarvisProvider>

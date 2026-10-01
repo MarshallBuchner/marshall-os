@@ -58,13 +58,11 @@ body::before {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.28;
+  opacity: 0.12;
+  /* Soft computational dust — not a starfield */
   background-image:
-    radial-gradient(1px 1px at 18% 22%, rgba(230, 238, 248, 0.4), transparent),
-    radial-gradient(1px 1px at 72% 18%, rgba(125, 211, 252, 0.28), transparent),
-    radial-gradient(1px 1px at 44% 68%, rgba(230, 238, 248, 0.22), transparent),
-    radial-gradient(1px 1px at 88% 58%, rgba(94, 234, 212, 0.18), transparent),
-    radial-gradient(1.2px 1.2px at 58% 42%, rgba(230, 238, 248, 0.16), transparent);
+    radial-gradient(1px 1px at 22% 30%, rgba(125, 211, 252, 0.2), transparent),
+    radial-gradient(1px 1px at 68% 55%, rgba(165, 243, 252, 0.12), transparent);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -266,31 +264,75 @@ a {
   animation: pipeline-in var(--dur-mid) var(--ease-os) both;
 }
 
-/* Immersive spatial command environment — entered room, not a boxed diagram */
-.spatial-stage {
-  min-height: min(78vh, 820px);
-  border-radius: 0;
-  border-color: rgba(120, 160, 200, 0.08);
-  box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.45);
+/* Jarvis hero home — core is the interface */
+.jarvis-hero-stage {
+  min-height: min(78vh, 860px);
+  height: min(78vh, 860px);
+  border-color: rgba(120, 160, 200, 0.1);
+  box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.5);
 }
 
-.spatial-viewport {
+.jarvis-hero-viewport {
   position: relative;
-  min-height: min(78vh, 820px);
-  height: min(78vh, 820px);
+  width: 100%;
+  height: min(78vh, 860px);
+  min-height: min(78vh, 860px);
   background: #02050a;
-}
-
-.spatial-canvas-host {
   touch-action: none;
 }
 
-.spatial-stage .glass {
-  border: none;
-  background: rgba(4, 8, 16, 0.55);
-  box-shadow: none;
-  backdrop-filter: blur(12px);
-  height: 100%;
+.spatial-stage,
+.spatial-viewport {
+  min-height: min(78vh, 860px);
+  height: min(78vh, 860px);
+  background: #02050a;
+}
+
+.mic-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--border-strong);
+  background: rgba(8, 16, 28, 0.85);
+  color: var(--cyan);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-os),
+    box-shadow var(--dur-fast) var(--ease-os),
+    color var(--dur-fast) var(--ease-os);
+}
+
+.mic-btn:hover {
+  border-color: var(--cyan);
+}
+
+.mic-btn-live {
+  color: var(--electric);
+  border-color: var(--electric);
+  box-shadow: 0 0 20px rgba(94, 234, 212, 0.25);
+}
+
+.mic-btn-unavailable {
+  opacity: 0.4;
+  cursor: not-allowed;
+  color: var(--text-muted);
+}
+
+.contextual-drawer {
+  animation: drawer-in var(--dur-mid) var(--ease-os);
+}
+
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 @keyframes ambient-breathe {
