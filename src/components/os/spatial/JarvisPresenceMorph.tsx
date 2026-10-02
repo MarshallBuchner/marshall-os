@@ -50,10 +50,12 @@ void main() {
   vStretch = aStretch;
   vFlow = aFlow;
   vRegion = aRegion;
-  float atten = 210.0 / max(32.0, -mv.z * 40.0);
-  float speakBoost = 1.0 + uSpeak * 0.12;
-  gl_PointSize = uSize * (0.45 + aSize * 0.55) * atten * (1.0 + aStretch * 0.85) * speakBoost;
-  gl_PointSize = clamp(gl_PointSize, 0.8, 14.0);
+  float atten = 240.0 / max(28.0, -mv.z * 38.0);
+  float speakBoost = 1.0 + uSpeak * 0.1;
+  // Finer micro points + longer silhouette streams
+  float popScale = aPop > 1.5 ? 0.7 : (aPop > 0.5 ? 0.82 : 1.0);
+  gl_PointSize = uSize * (0.32 + aSize * 0.48) * atten * (1.0 + aStretch * 0.95) * speakBoost * popScale;
+  gl_PointSize = clamp(gl_PointSize, 0.55, 11.0);
   gl_Position = projectionMatrix * mv;
 }
 `;
@@ -79,31 +81,34 @@ void main() {
   float ca = cos(vFlow);
   float sa = sin(vFlow);
   vec2 r = vec2(ca * c.x - sa * c.y, sa * c.x + ca * c.y);
-  float sx = mix(1.0, 0.28, clamp(vStretch, 0.0, 1.0));
-  float sy = mix(1.0, 1.55, clamp(vStretch, 0.0, 1.0));
+  float sx = mix(1.0, 0.22, clamp(vStretch, 0.0, 1.0));
+  float sy = mix(1.0, 1.7, clamp(vStretch, 0.0, 1.0));
   r.x /= sx;
   r.y /= sy;
   float d = length(r);
   if (d > 0.5) discard;
-  float soft = smoothstep(0.5, 0.1, d);
-  float grain = 0.85 + 0.15 * fract(sin(dot(gl_PointCoord * 40.0, vec2(12.9898, 78.233))) * 43758.5453);
+  float soft = smoothstep(0.5, 0.08, d);
+  float core = smoothstep(0.22, 0.0, d);
+  float grain = 0.82 + 0.18 * fract(sin(dot(gl_PointCoord * 52.0, vec2(12.9898, 78.233))) * 43758.5453);
 
-  float front = clamp((2.8 - vDepth) / 2.4, 0.0, 1.0);
-  float depthAlpha = mix(0.22, 1.0, front);
-  vec3 col = mix(uColor * 0.5, mix(uColor, uColorHi, 0.4 + front * 0.55), front);
-  col = mix(col, uColorHi, uFrontBoost * front * 0.35);
+  float front = clamp((2.9 - vDepth) / 2.5, 0.0, 1.0);
+  // Stronger holographic depth: bright front surface, darker internal/back
+  float depthAlpha = mix(0.16, 1.0, front);
+  vec3 col = mix(uColor * 0.38, mix(uColor, uColorHi, 0.35 + front * 0.6), front);
+  col = mix(col, uColorHi, uFrontBoost * front * 0.42);
+  col = mix(col, vec3(1.0), core * front * 0.22);
 
   // Face energy region → warm orange when speaking (restrained, not cartoon eyes)
   float isEnergy = step(9.5, vRegion) * (1.0 - step(10.5, vRegion));
   col = mix(col, mix(uColorHi, uWarm, 0.85), isEnergy * uSpeak * 0.92);
 
   // Assembling: slight lift + brighter silhouette streams
-  col = mix(col, uColorHi, uAssemble * 0.12 * (1.0 - isEnergy));
+  col = mix(col, uColorHi, uAssemble * 0.14 * (1.0 - isEnergy));
 
-  float popMul = vPop > 1.5 ? 0.38 : (vPop > 0.5 ? 0.75 : 1.0);
-  float alpha = soft * uOpacity * depthAlpha * popMul * (0.8 + vSize * 0.2) * grain;
+  float popMul = vPop > 1.5 ? 0.32 : (vPop > 0.5 ? 0.82 : 1.05);
+  float alpha = soft * uOpacity * depthAlpha * popMul * (0.78 + vSize * 0.22) * grain;
   // Semi-transparent bust during assemble
-  alpha *= mix(1.0, 0.78, uAssemble * 0.55);
+  alpha *= mix(1.0, 0.8, uAssemble * 0.5);
   gl_FragColor = vec4(col, alpha);
 }
 `;
@@ -210,12 +215,12 @@ export function JarvisPresenceMorph({
     () =>
       new THREE.ShaderMaterial({
         uniforms: {
-          uSize: { value: 2.2 },
-          uOpacity: { value: 0.78 },
+          uSize: { value: 1.9 },
+          uOpacity: { value: 0.88 },
           uColor: { value: new THREE.Color("#38bdf8") },
           uColorHi: { value: new THREE.Color("#e0f2fe") },
           uWarm: { value: new THREE.Color("#fb923c") },
-          uFrontBoost: { value: 0.3 },
+          uFrontBoost: { value: 0.36 },
           uSpeak: { value: 0 },
           uAssemble: { value: 0 },
         },
@@ -525,14 +530,14 @@ export function JarvisPresenceMorph({
     const bodyOpacity =
       presence === "core"
         ? 0.12 + accent.particle * 0.15
-        : 0.78 + accent.particle * 0.12 + assembleAmt * 0.06;
+        : 0.88 + accent.particle * 0.1 + assembleAmt * 0.05;
 
     if (body.current) {
       const bm = body.current.material as THREE.ShaderMaterial;
       bm.uniforms.uOpacity.value = bodyOpacity;
       bm.uniforms.uColor.value.set(accent.primary);
-      bm.uniforms.uFrontBoost.value = 0.28 + accent.intensity * 0.25;
-      bm.uniforms.uSize.value = tier === "HIGH" ? 2.15 : tier === "MEDIUM" ? 2.45 : 2.8;
+      bm.uniforms.uFrontBoost.value = 0.34 + accent.intensity * 0.28;
+      bm.uniforms.uSize.value = tier === "HIGH" ? 1.85 : tier === "MEDIUM" ? 2.15 : 2.55;
       bm.uniforms.uSpeak.value = speakSmooth.current;
       bm.uniforms.uAssemble.value = assembleAmt;
     }

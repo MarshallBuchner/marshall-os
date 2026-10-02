@@ -17,11 +17,11 @@ import {
 
 export type PresenceQuality = "HIGH" | "MEDIUM" | "MOBILE";
 
-/** Particle budgets — desktop tens of thousands; mobile protects face landmarks */
+/** Particle budgets — Reznikov-class density; mobile protects face + iOS budget */
 export const PRESENCE_COUNTS: Record<PresenceQuality, number> = {
-  HIGH: 42000,
-  MEDIUM: 20000,
-  MOBILE: 6500,
+  HIGH: 90000,
+  MEDIUM: 42000,
+  MOBILE: 14000,
 };
 
 export const Region = {
@@ -99,12 +99,13 @@ function write(buf: Float32Array, i: number, x: number, y: number, z: number) {
 
 function sizeFor(u: number, preferHighlight = false): SizeClass {
   if (preferHighlight) {
-    if (u < 0.35) return 2;
-    if (u < 0.7) return 1;
+    if (u < 0.32) return 2;
+    if (u < 0.68) return 1;
     return 0;
   }
-  if (u < 0.78) return 0;
-  if (u < 0.94) return 1;
+  // Bias toward micro grain for denser luminous mass
+  if (u < 0.84) return 0;
+  if (u < 0.96) return 1;
   return 2;
 }
 
@@ -195,19 +196,19 @@ export function buildPresenceLayout(count: number): PresenceLayout {
   const srnd = makeScaffoldRnd(211);
 
   // Eyes last; face/throat energy reserved; A/B/C over remaining body
-  const eyeCount = Math.min(48, Math.max(20, Math.floor(n * 0.01)));
-  const faceEnergyCount = Math.min(120, Math.max(36, Math.floor(n * 0.018)));
-  const throatCount = Math.min(48, Math.max(16, Math.floor(n * 0.008)));
-  const filamentCount = Math.floor(n * 0.018);
+  const eyeCount = Math.min(96, Math.max(28, Math.floor(n * 0.012)));
+  const faceEnergyCount = Math.min(220, Math.max(48, Math.floor(n * 0.022)));
+  const throatCount = Math.min(72, Math.max(20, Math.floor(n * 0.009)));
+  const filamentCount = Math.floor(n * 0.016);
   const reserved = eyeCount + faceEnergyCount + throatCount + filamentCount;
   const bodyCount = n - reserved;
 
-  // A ~68% surface (incl. streamline bias), B ~18% internal, C ~14% topo atmosphere
-  const countA = Math.floor(bodyCount * 0.68);
-  const countB = Math.floor(bodyCount * 0.18);
+  // A surface dense mass, B internal fill, C thinner atmosphere (less wispy)
+  const countA = Math.floor(bodyCount * 0.74);
+  const countB = Math.floor(bodyCount * 0.2);
   const countC = bodyCount - countA - countB;
 
-  const landmarkChance = n <= PRESENCE_COUNTS.MOBILE ? 0.68 : 0.5;
+  const landmarkChance = n <= PRESENCE_COUNTS.MOBILE ? 0.82 : 0.62;
 
   const assignScaffold = (
     i: number,
@@ -255,14 +256,14 @@ export function buildPresenceLayout(count: number): PresenceLayout {
   let cursor = 0;
 
   // Population A — dense surface + meridian streamlines
-  const streamShare = Math.floor(countA * 0.35);
+  const streamShare = Math.floor(countA * 0.28);
   for (let k = 0; k < streamShare && cursor < bodyCount; k++, cursor++) {
     // Prefer shoulders/neck/skull silhouette for flowing vertical streaks
     const sample = sampleScaffoldSurface(srnd, (r) =>
       r === "shoulder" || r === "neck" || r === "skull" || r === "chest" || r === "clavicle",
     );
     // Jitter along vertical to elongate perceived stream
-    sample.y += (rnd() - 0.5) * 0.04;
+    sample.y += (rnd() - 0.5) * 0.03;
     assignScaffold(cursor, 0, sample, { stream: true });
   }
   for (let k = streamShare; k < countA && cursor < bodyCount; k++, cursor++) {

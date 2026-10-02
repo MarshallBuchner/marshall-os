@@ -145,11 +145,11 @@ export function buildAnatomyTris(): Tri[] {
   const tris: Tri[] = [];
 
   // --- Cranial vault (dense ellipsoid, face-forward bias via later face plate) ---
-  const skullSegU = 36;
-  const skullSegV = 24;
-  const sx = 0.34;
-  const sy = 0.42;
-  const sz = 0.32;
+  const skullSegU = 48;
+  const skullSegV = 32;
+  const sx = 0.35;
+  const sy = 0.43;
+  const sz = 0.33;
   const cy = 1.0;
   for (let iv = 0; iv < skullSegV; iv++) {
     const v0 = iv / skullSegV;
@@ -179,8 +179,8 @@ export function buildAnatomyTris(): Tri[] {
   }
 
   // --- Front face plate (dense grid) — primary facial readability ---
-  const faceCols = 22;
-  const faceRows = 26;
+  const faceCols = 30;
+  const faceRows = 34;
   for (let iy = 0; iy < faceRows; iy++) {
     for (let ix = 0; ix < faceCols; ix++) {
       const u0 = ix / faceCols;
@@ -442,19 +442,19 @@ export function buildAnatomyTris(): Tri[] {
 }
 
 const REGION_WEIGHT: Record<ScaffoldRegion, number> = {
-  skull: 1.05,
-  brow: 4.5,
-  orbit: 5.0,
-  lid: 4.0,
-  nose: 5.5,
-  cheek: 3.0,
-  lips: 5.8,
-  jaw: 3.2,
-  ear: 1.6,
-  neck: 2.0,
-  clavicle: 2.4,
-  shoulder: 1.35,
-  chest: 1.15,
+  skull: 1.55,
+  brow: 6.2,
+  orbit: 7.0,
+  lid: 5.5,
+  nose: 7.5,
+  cheek: 4.2,
+  lips: 7.8,
+  jaw: 4.0,
+  ear: 1.8,
+  neck: 2.4,
+  clavicle: 2.8,
+  shoulder: 1.85,
+  chest: 1.45,
 };
 
 type WeightedTri = Tri & { cumulative: number };
@@ -544,10 +544,15 @@ export function sampleScaffoldSurface(
   return best;
 }
 
-/** Internal depth sample (population B) — inset along normal. */
+/** Internal depth sample (population B) — inset along normal for solid mass. */
 export function sampleScaffoldInternal(rnd: () => number): ScaffoldSample {
-  const s = sampleScaffoldSurface(rnd);
-  const inset = 0.015 + rnd() * 0.09;
+  const preferFace = rnd() < 0.45;
+  const s = sampleScaffoldSurface(
+    rnd,
+    preferFace ? (r) => isFaceLandmark(r) || r === "skull" || r === "neck" : undefined,
+  );
+  // Tighter insets → denser volumetric fill (less hollow bust)
+  const inset = 0.008 + rnd() * 0.07;
   return {
     x: s.x - s.nx * inset,
     y: s.y - s.ny * inset,
@@ -562,11 +567,13 @@ export function sampleScaffoldInternal(rnd: () => number): ScaffoldSample {
 /** Atmospheric drift around silhouette (population C). */
 export function sampleScaffoldAtmosphere(rnd: () => number): ScaffoldSample {
   const s = sampleScaffoldSurface(rnd);
-  const outward = 0.06 + rnd() * 0.4;
+  const outward = 0.03 + rnd() * 0.2;
+  // Cap upward/side spray so mobile framing can keep the full cranium on-canvas
+  const up = Math.min(0.08, Math.max(0, s.ny) * outward * 0.3);
   return {
-    x: s.x + s.nx * outward + (rnd() - 0.5) * 0.06,
-    y: s.y + s.ny * outward * 0.55 + (rnd() - 0.5) * 0.08,
-    z: s.z + s.nz * outward * 0.65 + (rnd() - 0.5) * 0.05,
+    x: s.x + s.nx * outward * 0.85 + (rnd() - 0.5) * 0.035,
+    y: s.y + up + (rnd() - 0.5) * 0.03,
+    z: s.z + s.nz * outward * 0.65 + (rnd() - 0.5) * 0.03,
     nx: s.nx,
     ny: s.ny,
     nz: s.nz,

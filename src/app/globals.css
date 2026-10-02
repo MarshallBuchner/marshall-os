@@ -403,6 +403,8 @@ a {
   justify-content: center;
   min-height: 52dvh;
   padding-top: 3.25rem;
+  /* Soft glow may extend; hard crown clip is avoided via JarvisCore2D fit-in-frame */
+  overflow: visible;
 }
 
 .jarvis-core-2d {

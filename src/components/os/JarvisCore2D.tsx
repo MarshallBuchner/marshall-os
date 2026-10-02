@@ -240,9 +240,25 @@ export function JarvisCore2D({
         });
       }
 
-      // Mobile: head-and-shoulders — keep crown on-canvas, enlarge vs core diameter
-      const baseScale = R * (0.88 + humanoidAmt * 0.22);
-      const yBias = humanoidAmt * R * 0.12;
+      // Mobile fit-in-frame: keep full cranium + shoulders inside the square canvas.
+      // Prior V2 used baseScale≈R*1.1 + mild yBias — crown (y≈1.52, z≈0.47) projected
+      // above y=0 and was chopped by the canvas. Prefer scale/offset over clipping.
+      // Bounds include scaffold + atmosphere + front-depthScale headroom (measured).
+      const Y_TOP = 1.55;
+      const Y_BOT = -0.08;
+      const X_EXT = 0.78;
+      const DEPTH = 1.32;
+      const margin = Math.max(12, size * 0.06);
+      const fitH = (size - margin * 2) / ((Y_TOP - Y_BOT) * DEPTH);
+      const fitW = (size - margin * 2) / (X_EXT * 2 * DEPTH);
+      const humanoidFit = Math.min(fitH, fitW) * 0.9;
+      const coreParticleScale = R * 0.88;
+      const baseScale = coreParticleScale + (humanoidFit - coreParticleScale) * humanoidAmt;
+      // Center bust in the square with a little top margin preference for the crown
+      const yMid = (Y_TOP + Y_BOT) * 0.5;
+      const targetMidY = size * 0.47;
+      const fitBiasFull = targetMidY - (cy - yMid * humanoidFit);
+      const yBias = humanoidAmt * fitBiasFull;
       const persp = 2.55;
 
       // Precompute RGB once per accent
@@ -268,22 +284,38 @@ export function JarvisCore2D({
         const sy = cy - y * baseScale * depthScale + yBias;
 
         const sizeClass = layout.sizes[i];
+        const pop = layout.populations[i];
+        // Finer points → denser perceived mass (Reznikov grain, not sparse blobs)
         let rad =
-          sizeClass >= 1.5 ? 2.9 : sizeClass >= 0.5 ? 2.15 : 1.7;
-        rad *= depthScale * (0.95 + localT * 0.12);
-        if (region === Region.DRIFT) rad *= 0.65;
-        if (region === Region.ENERGY) rad *= 1.25 + Math.sin(t * 2.2 + i) * 0.08;
-        if (region === Region.CRANIUM || region === Region.CHEEK) rad *= 1.08;
-        if (region === Region.NOSE || region === Region.BROW || region === Region.MOUTH) rad *= 1.12;
+          sizeClass >= 1.5 ? 2.15 : sizeClass >= 0.5 ? 1.55 : 1.15;
+        rad *= depthScale * (0.92 + localT * 0.1);
+        if (region === Region.DRIFT) rad *= 0.55;
+        if (pop === 1) rad *= 0.85; // internal fill — smaller, denser
+        if (region === Region.ENERGY) rad *= 1.2 + Math.sin(t * 2.2 + i) * 0.07;
+        if (region === Region.CRANIUM || region === Region.CHEEK) rad *= 1.05;
+        if (region === Region.NOSE || region === Region.BROW || region === Region.MOUTH) rad *= 1.15;
+        if (region === Region.SILHOUETTE) rad *= 0.95;
 
         const front = clamp01((z + 0.45) / 0.95);
         let alpha =
-          (presenceNow === "core" ? 0.14 : 0.42 + accent.particle * 0.4) *
-          (0.55 + front * 0.55) *
+          (presenceNow === "core" ? 0.14 : 0.52 + accent.particle * 0.35) *
+          (0.5 + front * 0.6) *
           localT;
-        if (region === Region.ENERGY) alpha *= 1.25;
-        if (region === Region.DRIFT) alpha *= 0.45;
-        if (region === Region.SILHOUETTE) alpha *= 1.1;
+        if (pop === 1) alpha *= 0.72;
+        if (region === Region.ENERGY) alpha *= 1.2;
+        if (region === Region.DRIFT) alpha *= 0.38;
+        if (region === Region.SILHOUETTE) alpha *= 1.15;
+        if (
+          region === Region.NOSE ||
+          region === Region.BROW ||
+          region === Region.MOUTH ||
+          region === Region.ORBIT ||
+          region === Region.CHEEK ||
+          region === Region.JAW
+        ) {
+          alpha *= 1.28;
+          rad *= 1.06;
+        }
 
         const speaking = visualNow === "SPEAKING";
         // Face warm core while speaking — orange energy overlay (not giant eyes)
