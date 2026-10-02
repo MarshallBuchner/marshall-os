@@ -72,20 +72,34 @@ const MALE_NAME_HINTS =
 const FEMALE_NAME_HINTS =
   /\b(female|woman|fiona|kate|serena|martha|moira|tessa|samantha|karen|susan)\b/i;
 
+/** Normalize BCP-47 / underscore variants (en_GB → en-gb). */
+export function normalizeLangTag(lang: string | undefined | null): string {
+  return (lang || "").toLowerCase().replace(/_/g, "-");
+}
+
 function isEnGb(v: SpeechSynthesisVoice): boolean {
-  const lang = (v.lang || "").toLowerCase();
+  const lang = normalizeLangTag(v.lang);
   return lang === "en-gb" || lang.startsWith("en-gb") || /uk\s*english/i.test(v.name);
 }
 
 function isEnglish(v: SpeechSynthesisVoice): boolean {
-  const lang = (v.lang || "").toLowerCase();
+  const lang = normalizeLangTag(v.lang);
   return lang === "en" || lang.startsWith("en-") || /\benglish\b/i.test(v.name);
+}
+
+function isExplicitMale(v: SpeechSynthesisVoice): boolean {
+  const n = v.name || "";
+  return /\bmale\b/i.test(n) || /google\s+uk\s+english\s+male/i.test(n);
+}
+
+function isKnownFemale(v: SpeechSynthesisVoice): boolean {
+  return FEMALE_NAME_HINTS.test(v.name || "") || /\bfemale\b/i.test(v.name || "");
 }
 
 function maleScore(v: SpeechSynthesisVoice): number {
   const n = v.name || "";
-  if (FEMALE_NAME_HINTS.test(n)) return -2;
-  if (/\bmale\b/i.test(n)) return 3;
+  if (isKnownFemale(v)) return -2;
+  if (isExplicitMale(v)) return 5;
   if (MALE_NAME_HINTS.test(n)) return 2;
   return 0;
 }
@@ -95,9 +109,9 @@ function isDanielEnGb(v: SpeechSynthesisVoice): boolean {
 }
 
 /**
- * Preference: real Daniel en-GB → best en-GB male (known names) → best en-GB → English → null.
- * Always returns a real SpeechSynthesisVoice from the provided list, or null.
- * Never fabricates a voice object from a name string.
+ * Preference: Daniel en-GB → explicit Male / Google UK English Male → known male names →
+ * non-female en-GB → English male → English → null.
+ * Only-female en-GB still returns that voice (catalog limit). Never fabricates a voice.
  */
 export function pickJarvisTtsVoice(
   voices: SpeechSynthesisVoice[],
@@ -109,10 +123,19 @@ export function pickJarvisTtsVoice(
 
   const enGb = voices.filter(isEnGb);
   if (enGb.length) {
+    const explicit = [...enGb]
+      .filter(isExplicitMale)
+      .sort((a, b) => maleScore(b) - maleScore(a));
+    if (explicit.length) return explicit[0];
+
     const males = [...enGb]
       .filter((v) => maleScore(v) > 0)
       .sort((a, b) => maleScore(b) - maleScore(a));
     if (males.length) return males[0];
+
+    const nonFemale = enGb.filter((v) => !isKnownFemale(v));
+    if (nonFemale.length) return nonFemale[0];
+
     return enGb[0];
   }
 
@@ -122,6 +145,8 @@ export function pickJarvisTtsVoice(
       .filter((v) => maleScore(v) > 0)
       .sort((a, b) => maleScore(b) - maleScore(a));
     if (males.length) return males[0];
+    const nonFemale = en.filter((v) => !isKnownFemale(v));
+    if (nonFemale.length) return nonFemale[0];
     return en[0];
   }
 
@@ -129,7 +154,7 @@ export function pickJarvisTtsVoice(
 }
 
 /** Re-resolve preferred voice against a fresh getVoices() list (iOS stale-object fix). */
-function resolveLiveVoice(
+export function resolveLiveVoice(
   preferred: SpeechSynthesisVoice | null,
   liveList: SpeechSynthesisVoice[],
 ): SpeechSynthesisVoice | null {
@@ -138,8 +163,10 @@ function resolveLiveVoice(
     const byUri = liveList.find((v) => v.voiceURI === preferred.voiceURI);
     if (byUri) return byUri;
   }
+  const prefLang = normalizeLangTag(preferred.lang);
   const byNameLang = liveList.find(
-    (v) => v.name === preferred.name && v.lang === preferred.lang,
+    (v) =>
+      v.name === preferred.name && normalizeLangTag(v.lang) === prefLang,
   );
   if (byNameLang) return byNameLang;
   return liveList.find((v) => v.name === preferred.name) || null;
@@ -154,19 +181,34 @@ function readVoices(): SpeechSynthesisVoice[] {
   }
 }
 
+function hasPreferredMale(list: SpeechSynthesisVoice[]): boolean {
+  return list.some(
+    (v) => isDanielEnGb(v) || (isEnGb(v) && maleScore(v) > 0),
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 /**
  * Bounded wait for iOS/Chrome async voice population.
- * Resolves with whatever is available — never infinite, never blocks forever.
+ * Does NOT early-return on the first non-empty list — Chrome often loads Kate/Serena
+ * before Google UK English Male. Brief stability window; warm catalogs settle ≤ ~220ms.
+ * Never infinite; speak even if the list stays empty.
  */
 function waitForVoices(maxMs = 1500): Promise<SpeechSynthesisVoice[]> {
-  const immediate = readVoices();
-  if (immediate.length) return Promise.resolve(immediate);
   if (!isSpeechSynthesisAvailable()) return Promise.resolve([]);
 
   return new Promise((resolve) => {
     let settled = false;
     let poll: ReturnType<typeof setInterval> | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastCount = -1;
+    let stableSince = Date.now();
+    const start = Date.now();
 
     const finish = (voices: SpeechSynthesisVoice[]) => {
       if (settled) return;
@@ -181,10 +223,34 @@ function waitForVoices(maxMs = 1500): Promise<SpeechSynthesisVoice[]> {
       resolve(voices);
     };
 
-    const onChange = () => {
+    const consider = () => {
       const list = readVoices();
-      if (list.length) finish(list);
+      const now = Date.now();
+      const elapsed = now - start;
+
+      if (list.length !== lastCount) {
+        lastCount = list.length;
+        stableSince = now;
+      }
+
+      if (list.length > 0) {
+        const stableMs = now - stableSince;
+        // Preferred male present: short settle then go (keep near user gesture on iOS)
+        if (hasPreferredMale(list) && stableMs >= 80 && elapsed >= 100) {
+          finish(list);
+          return;
+        }
+        // Warm catalog stability — ≤ ~220ms when already populated
+        if (stableMs >= 220 && elapsed >= 220) {
+          finish(list);
+          return;
+        }
+      }
+
+      if (elapsed >= maxMs) finish(list);
     };
+
+    const onChange = () => consider();
 
     try {
       window.speechSynthesis.addEventListener?.("voiceschanged", onChange);
@@ -192,19 +258,15 @@ function waitForVoices(maxMs = 1500): Promise<SpeechSynthesisVoice[]> {
       /* ignore */
     }
 
-    // Kick Chrome/Safari voice load
     try {
       void window.speechSynthesis.getVoices();
     } catch {
       /* ignore */
     }
 
-    poll = setInterval(() => {
-      const list = readVoices();
-      if (list.length) finish(list);
-    }, 100);
-
+    poll = setInterval(consider, 50);
     timer = setTimeout(() => finish(readVoices()), maxMs);
+    consider();
   });
 }
 
@@ -215,7 +277,6 @@ function ensureVoicesListener() {
   try {
     void window.speechSynthesis.getVoices();
     window.speechSynthesis.addEventListener?.("voiceschanged", () => {
-      // Warm cache only — speak() always re-reads live voices
       void readVoices();
     });
     const synth = window.speechSynthesis as SpeechSynthesis & {
@@ -280,9 +341,37 @@ function commitUtteranceDebug(
   );
 }
 
+function assignVoiceToUtterance(
+  u: SpeechSynthesisUtterance,
+  voice: SpeechSynthesisVoice | null,
+): SpeechSynthesisVoice | null {
+  try {
+    if (voice) {
+      // lang first, then voice — WebKit is sensitive to assign order
+      u.lang = voice.lang || "en-GB";
+      u.voice = voice;
+    } else {
+      u.lang = "en-GB";
+    }
+  } catch {
+    try {
+      u.lang = "en-GB";
+    } catch {
+      /* platform default */
+    }
+  }
+  return u.voice ?? null;
+}
+
 export function createBrowserTtsAdapter(): TextToSpeechAdapter {
   let muted = false;
   ensureVoicesListener();
+  // Prime catalog early so speak() often sees a warm list (Chrome wave load)
+  try {
+    void waitForVoices(1500);
+  } catch {
+    /* ignore */
+  }
 
   const adapter: TextToSpeechAdapter = {
     available: (() => {
@@ -316,13 +405,17 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
         const trimmed = text.trim().slice(0, 220);
         if (!trimmed) return;
 
+        // Cancel only when needed, then brief yield (iOS/Chrome assign drop after cancel)
         try {
-          adapter.stop();
+          const synth = window.speechSynthesis;
+          if (synth.speaking || synth.pending) {
+            synth.cancel();
+            await sleep(60);
+          }
         } catch {
           /* ignore */
         }
 
-        // Bounded wait — never infinite; speak even if list stays empty
         let available: SpeechSynthesisVoice[] = [];
         try {
           available = await waitForVoices(1500);
@@ -330,11 +423,11 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
           available = readVoices();
         }
 
-        // Fresh snapshot again immediately before assign (iOS stale objects)
-        const liveList = readVoices();
-        const list = liveList.length ? liveList : available;
-        const preferred = pickJarvisTtsVoice(list);
-        const selected = resolveLiveVoice(preferred, list) || preferred;
+        let list = readVoices();
+        if (!list.length) list = available;
+
+        let preferred = pickJarvisTtsVoice(list);
+        let selected = resolveLiveVoice(preferred, list) || preferred;
 
         let u: SpeechSynthesisUtterance;
         try {
@@ -343,19 +436,17 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
           return;
         }
 
-        // Assign voice + lang first, then delivery params — do not recreate utterance after
-        try {
-          if (selected) {
-            u.voice = selected;
-            u.lang = selected.lang || "en-GB";
-          } else {
-            u.lang = "en-GB";
-          }
-        } catch {
-          try {
-            u.lang = "en-GB";
-          } catch {
-            /* platform default */
+        assignVoiceToUtterance(u, selected);
+
+        // Retry assign if engine dropped voice
+        if (selected && !u.voice) {
+          const retryList = readVoices();
+          const again =
+            resolveLiveVoice(selected, retryList) ||
+            pickJarvisTtsVoice(retryList);
+          if (again) {
+            selected = again;
+            assignVoiceToUtterance(u, again);
           }
         }
 
@@ -363,7 +454,23 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
         u.pitch = JARVIS_TTS_PITCH;
         u.volume = JARVIS_TTS_VOLUME;
 
-        // Log ACTUAL utterance fields immediately BEFORE speak
+        // Final live re-bind immediately before speak
+        const finalList = readVoices();
+        if (finalList.length) {
+          list = finalList;
+          if (selected) {
+            const live = resolveLiveVoice(selected, finalList);
+            if (live) {
+              selected = live;
+              assignVoiceToUtterance(u, live);
+            }
+          } else {
+            preferred = pickJarvisTtsVoice(finalList);
+            selected = resolveLiveVoice(preferred, finalList) || preferred;
+            assignVoiceToUtterance(u, selected);
+          }
+        }
+
         commitUtteranceDebug(selected, list, u);
 
         await new Promise<void>((resolve) => {
@@ -409,6 +516,12 @@ export function createBrowserTtsAdapter(): TextToSpeechAdapter {
 
           try {
             window.speechSynthesis.speak(u);
+            // Chrome may stay paused after cancel — resume so utterance actually plays
+            try {
+              window.speechSynthesis.resume();
+            } catch {
+              /* ignore */
+            }
           } catch {
             done();
           }
