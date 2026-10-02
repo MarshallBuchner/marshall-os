@@ -463,8 +463,9 @@ export function JarvisPresenceMorph({
     const eyeReveal = THREE.MathUtils.smoothstep(morph, 0.86, 0.98);
     if (eyes.current) {
       eyes.current.visible = eyeReveal > 0.04 && speakSmooth.current < 0.85;
-      eyeMat.uniforms.uOpacity.value = eyeReveal * (0.55 - speakSmooth.current * 0.25);
-      eyeMat.uniforms.uSize.value = 3.2;
+      const em = eyes.current.material as THREE.ShaderMaterial;
+      em.uniforms.uOpacity.value = eyeReveal * (0.55 - speakSmooth.current * 0.25);
+      em.uniforms.uSize.value = 3.2;
       pushRange(eyes.current, current, layout.eyeStart, layout.eyeCount);
     }
 
@@ -472,11 +473,12 @@ export function JarvisPresenceMorph({
     if (faceWarm.current) {
       const on = morph > 0.55 && speakSmooth.current > 0.04;
       faceWarm.current.visible = on;
-      warmMat.uniforms.uOpacity.value = on
+      const wm = faceWarm.current.material as THREE.ShaderMaterial;
+      wm.uniforms.uOpacity.value = on
         ? speakSmooth.current * (0.55 + level * 0.35)
         : 0;
-      warmMat.uniforms.uSize.value = 3.8 + speakSmooth.current * 2.2;
-      warmMat.uniforms.uColor.value.set(
+      wm.uniforms.uSize.value = 3.8 + speakSmooth.current * 2.2;
+      wm.uniforms.uColor.value.set(
         speakSmooth.current > 0.3 ? "#fb923c" : "#38bdf8",
       );
     }
@@ -485,15 +487,16 @@ export function JarvisPresenceMorph({
     if (throat.current) {
       const on = morph > 0.45;
       throat.current.visible = on;
-      throatMat.uniforms.uOpacity.value = on
+      const tm = throat.current.material as THREE.ShaderMaterial;
+      tm.uniforms.uOpacity.value = on
         ? 0.55 + Math.sin(t * 2.8) * 0.12 + speakSmooth.current * 0.15
         : 0;
-      throatMat.uniforms.uSize.value = 5.2 + Math.sin(t * 3.1) * 0.4;
+      tm.uniforms.uSize.value = 5.2 + Math.sin(t * 3.1) * 0.4;
     }
 
     // Small red/white accent particles during resolve
     if (accents.current) {
-      const am = accentMat;
+      const am = accents.current.material as THREE.PointsMaterial;
       const show = assembleAmt > 0.15 || presence === "transforming";
       accents.current.visible = show;
       am.opacity = show ? 0.35 + assembleAmt * 0.35 : 0;
@@ -524,12 +527,15 @@ export function JarvisPresenceMorph({
         ? 0.12 + accent.particle * 0.15
         : 0.78 + accent.particle * 0.12 + assembleAmt * 0.06;
 
-    bodyMat.uniforms.uOpacity.value = bodyOpacity;
-    bodyMat.uniforms.uColor.value.set(accent.primary);
-    bodyMat.uniforms.uFrontBoost.value = 0.28 + accent.intensity * 0.25;
-    bodyMat.uniforms.uSize.value = tier === "HIGH" ? 2.15 : tier === "MEDIUM" ? 2.45 : 2.8;
-    bodyMat.uniforms.uSpeak.value = speakSmooth.current;
-    bodyMat.uniforms.uAssemble.value = assembleAmt;
+    if (body.current) {
+      const bm = body.current.material as THREE.ShaderMaterial;
+      bm.uniforms.uOpacity.value = bodyOpacity;
+      bm.uniforms.uColor.value.set(accent.primary);
+      bm.uniforms.uFrontBoost.value = 0.28 + accent.intensity * 0.25;
+      bm.uniforms.uSize.value = tier === "HIGH" ? 2.15 : tier === "MEDIUM" ? 2.45 : 2.8;
+      bm.uniforms.uSpeak.value = speakSmooth.current;
+      bm.uniforms.uAssemble.value = assembleAmt;
+    }
 
     // Residual JARVIS DNA HUD — denser segmented rings + amber accents (original, not MCU clone)
     if (hud.current) {
