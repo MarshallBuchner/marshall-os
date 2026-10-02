@@ -24,7 +24,7 @@ export function MobileRemote({ activitySeed }: { activitySeed: ActivityEvent[] }
 
   useEffect(() => {
     // Moderately larger composition — still leaves room for ask UI
-    const update = () => setCoreSize(Math.min(400, Math.floor(window.innerWidth * 0.88)));
+    const update = () => setCoreSize(Math.min(440, Math.floor(window.innerWidth * 0.92)));
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);

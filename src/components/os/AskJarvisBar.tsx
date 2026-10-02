@@ -113,7 +113,11 @@ export function AskJarvisBar({ showPrompt = true, cinematic = true }: Props) {
       )}
       {(presence === "transforming" || presence === "returning") && !speaking && (
         <p className="ask-status" role="status">
-          {presence === "transforming" ? "Transforming" : "Returning"}
+          {presence === "transforming"
+            ? transformProgress < 0.55
+              ? "Resolving form"
+              : "Assembling…"
+            : "Returning"}
         </p>
       )}
       {presence === "humanoid" && !speaking && !listening && (

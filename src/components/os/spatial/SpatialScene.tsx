@@ -72,9 +72,11 @@ function cameraFor(mode: CameraMode) {
     case "APPROVAL":
       return { pos: new THREE.Vector3(0, 0.18, 3.6), look: new THREE.Vector3(0, 0.05, 0) };
     case "TRANSFORM":
-      return { pos: new THREE.Vector3(0.1, 0.45, 4.1), look: new THREE.Vector3(0, 0.35, 0) };
+      // Pull back + lift as presence expands beyond core diameter
+      return { pos: new THREE.Vector3(0.06, 0.7, 4.35), look: new THREE.Vector3(0, 0.55, 0) };
     case "HUMANOID":
-      return { pos: new THREE.Vector3(0, 0.55, 3.7), look: new THREE.Vector3(0, 0.55, 0) };
+      // Head/neck/shoulders ~65–80% vertical stage; face readable
+      return { pos: new THREE.Vector3(0, 0.78, 3.55), look: new THREE.Vector3(0, 0.7, 0) };
     case "HERO":
     default:
       return { pos: new THREE.Vector3(0, 0.15, 3.7), look: new THREE.Vector3(0, 0.05, 0) };
@@ -214,15 +216,28 @@ function SceneContent({ reducedMotion }: { reducedMotion: boolean }) {
   const freezeExtras = presence === "transforming" || presence === "returning";
   const humanoidSurfaceCap = presence === "humanoid";
   const coreScale = useDesktopCoreScale();
+  // Humanoid owns its own composition — not constrained to CORE diameter.
+  // During morph, blend toward a larger presence scale (~65–80% vertical).
+  const humanoidBlend =
+    presence === "humanoid"
+      ? 1
+      : presence === "transforming"
+        ? dissolveAmt
+        : presence === "returning"
+          ? dissolveAmt
+          : 0;
+  // coreScale≈0.26–0.42; amplify strongly so head/shoulders fill the stage
+  const presenceScale = THREE.MathUtils.lerp(coreScale, coreScale * 3.05, humanoidBlend);
+  const coreOnlyScale = THREE.MathUtils.lerp(coreScale, coreScale * 0.88, humanoidBlend);
 
   return (
     <>
       <EnvironmentRoom reducedMotion={reducedMotion} />
       <RoomDust reducedMotion={reducedMotion} density={freezeExtras ? 0.4 : 1} />
 
-      {/* Scale core+presence only — room/modules keep composition space around the centerpiece */}
+      {/* CORE keeps diameter-based scale; morphing presence expands independently */}
       <group
-        scale={[coreScale, coreScale, coreScale]}
+        scale={[coreOnlyScale, coreOnlyScale, coreOnlyScale]}
         onClick={(e) => {
           e.stopPropagation();
           setAwake(true);
@@ -236,6 +251,16 @@ function SceneContent({ reducedMotion }: { reducedMotion: boolean }) {
           awake={awake}
           dissolve={dissolveAmt}
         />
+      </group>
+
+      <group
+        scale={[presenceScale, presenceScale, presenceScale]}
+        onClick={(e) => {
+          e.stopPropagation();
+          setAwake(true);
+          window.setTimeout(() => setAwake(false), 800);
+        }}
+      >
         <JarvisPresenceMorph
           presence={presence}
           progress={transformProgress}

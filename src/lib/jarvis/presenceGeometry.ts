@@ -1,15 +1,27 @@
 /**
- * Shared particle layouts for CORE ↔ HUMANOID morph.
- * Original abstract bust — computational reconstruction, not a likeness clone.
+ * Shared particle layouts for CORE ↔ HUMANOID morph (V2).
+ * Samples an invisible neutral anatomical scaffold — computational reconstruction,
+ * not a likeness clone. Populations: A surface / B internal / C atmospheric.
  */
+
+import {
+  isFaceLandmark,
+  isSilhouetteHeavy,
+  makeScaffoldRnd,
+  sampleScaffoldAtmosphere,
+  sampleScaffoldInternal,
+  sampleScaffoldSurface,
+  scaffoldRegionToPresence,
+  type ScaffoldRegion,
+} from "@/lib/jarvis/anatomyScaffold";
 
 export type PresenceQuality = "HIGH" | "MEDIUM" | "MOBILE";
 
-/** Particle budgets by quality tier (before ≈ desktop 900 / mobile 220) */
+/** Particle budgets — desktop tens of thousands; mobile protects face landmarks */
 export const PRESENCE_COUNTS: Record<PresenceQuality, number> = {
-  HIGH: 5200,
-  MEDIUM: 3000,
-  MOBILE: 2000,
+  HIGH: 42000,
+  MEDIUM: 20000,
+  MOBILE: 6500,
 };
 
 export const Region = {
@@ -34,15 +46,31 @@ export type RegionId = (typeof Region)[keyof typeof Region];
 /** Size class: 0 micro (~70%), 1 medium (~20%), 2 highlight (~10%) */
 export type SizeClass = 0 | 1 | 2;
 
+/** Population: 0 = A surface, 1 = B internal, 2 = C atmospheric */
+export type Population = 0 | 1 | 2;
+
 export type PresenceLayout = {
   count: number;
   core: Float32Array;
   humanoid: Float32Array;
+  /** Mid-control points for curved force-field morph (xyz per particle) */
+  curve: Float32Array;
   sizes: Float32Array;
   delays: Float32Array;
   regions: Uint8Array;
+  populations: Uint8Array;
+  /** Streamline flow angle (radians) — vertical wireframe aesthetic */
+  flow: Float32Array;
+  /** Streamline stretch 0–1 (higher = longer thin streaks) */
+  stretch: Float32Array;
   eyeStart: number;
   eyeCount: number;
+  /** Indices for face warm-core energy (SPEAKING) */
+  faceEnergyStart: number;
+  faceEnergyCount: number;
+  /** Indices for throat cyan hotspot */
+  throatStart: number;
+  throatCount: number;
 };
 
 function makeRnd(seed0: number) {
@@ -62,13 +90,7 @@ function smooth01(t: number) {
   return x * x * (3 - 2 * x);
 }
 
-function write(
-  buf: Float32Array,
-  i: number,
-  x: number,
-  y: number,
-  z: number,
-) {
+function write(buf: Float32Array, i: number, x: number, y: number, z: number) {
   const o = i * 3;
   buf[o] = finite(x);
   buf[o + 1] = finite(y);
@@ -76,7 +98,6 @@ function write(
 }
 
 function sizeFor(u: number, preferHighlight = false): SizeClass {
-  // Target global mix ≈ 70% micro / 20% medium / 10% highlight
   if (preferHighlight) {
     if (u < 0.35) return 2;
     if (u < 0.7) return 1;
@@ -87,171 +108,302 @@ function sizeFor(u: number, preferHighlight = false): SizeClass {
   return 2;
 }
 
-/** Sample on ellipsoid surface (theta azimuth, phi polar from +Y) */
-function sampleEllipsoid(
-  rnd: () => number,
+/** Assembly delay by scaffold region — chest/shoulders → neck → skull → face → eyes */
+function delayForScaffold(region: ScaffoldRegion, rnd: () => number): number {
+  switch (region) {
+    case "chest":
+      return 0.0 + rnd() * 0.1;
+    case "clavicle":
+      return 0.04 + rnd() * 0.1;
+    case "shoulder":
+      return 0.06 + rnd() * 0.12;
+    case "neck":
+      return 0.14 + rnd() * 0.12;
+    case "skull":
+      return 0.22 + rnd() * 0.16;
+    case "ear":
+      return 0.28 + rnd() * 0.14;
+    case "cheek":
+      return 0.4 + rnd() * 0.14;
+    case "brow":
+      return 0.44 + rnd() * 0.12;
+    case "orbit":
+    case "lid":
+      return 0.48 + rnd() * 0.12;
+    case "jaw":
+      return 0.5 + rnd() * 0.12;
+    case "nose":
+      return 0.56 + rnd() * 0.12;
+    case "lips":
+      return 0.6 + rnd() * 0.12;
+    default:
+      return 0.25 + rnd() * 0.3;
+  }
+}
+
+function curveControl(
   cx: number,
   cy: number,
   cz: number,
-  rx: number,
-  ry: number,
-  rz: number,
-  surfaceBias = 0.92,
+  hx: number,
+  hy: number,
+  hz: number,
+  rnd: () => number,
+  region: RegionId,
 ) {
-  const theta = rnd() * Math.PI * 2;
-  const phi = Math.acos(2 * rnd() - 1);
-  const shell = surfaceBias + (1 - surfaceBias) * rnd();
-  const sx = Math.sin(phi) * Math.cos(theta);
-  const sy = Math.cos(phi);
-  const sz = Math.sin(phi) * Math.sin(theta);
+  // Midpoint + outward swirl (force-field arc) — stronger for torso release
+  const mx = (cx + hx) * 0.5;
+  const my = (cy + hy) * 0.5;
+  const mz = (cz + hz) * 0.5;
+  const dx = hx - cx;
+  const dy = hy - cy;
+  const dz = hz - cz;
+  // Perpendicular swirl in XY
+  const swirl = 0.35 + rnd() * 0.55;
+  const px = -dy * swirl * (0.4 + rnd());
+  const py = dx * swirl * (0.25 + rnd() * 0.4);
+  const lift =
+    region === Region.TORSO || region === Region.SHOULDER
+      ? 0.35 + rnd() * 0.45
+      : region === Region.NECK
+        ? 0.2 + rnd() * 0.25
+        : 0.08 + rnd() * 0.2;
+  const outward = 0.15 + rnd() * 0.35;
   return {
-    x: cx + sx * rx * shell,
-    y: cy + sy * ry * shell,
-    z: cz + sz * rz * shell,
+    x: mx + px + (hx !== 0 ? Math.sign(hx) : rnd() - 0.5) * outward * 0.3,
+    y: my + py + lift,
+    z: mz + dz * 0.15 + (rnd() - 0.5) * 0.25,
   };
 }
 
 /**
- * Build paired CORE / HUMANOID targets with shared particle ownership,
- * non-uniform anatomy density, size hierarchy, and staggered assembly delays.
+ * Build paired CORE / HUMANOID targets with scaffold sampling,
+ * A/B/C populations, size hierarchy, staggered delays, curved morph controls.
  */
 export function buildPresenceLayout(count: number): PresenceLayout {
   const n = Math.max(128, count | 0);
   const core = new Float32Array(n * 3);
   const humanoid = new Float32Array(n * 3);
+  const curve = new Float32Array(n * 3);
   const sizes = new Float32Array(n);
   const delays = new Float32Array(n);
   const regions = new Uint8Array(n);
+  const populations = new Uint8Array(n);
+  const flow = new Float32Array(n);
+  const stretch = new Float32Array(n);
   const rnd = makeRnd(113);
+  const srnd = makeScaffoldRnd(211);
 
-  // Budget split — eyes last; denser face + volume-filled cranium/chest
-  const eyeCount = Math.min(48, Math.max(20, Math.floor(n * 0.028)));
-  const driftCount = Math.floor(n * 0.045);
-  const energyCount = Math.floor(n * 0.035);
-  const bodyCount = n - eyeCount - driftCount - energyCount;
+  // Eyes last; face/throat energy reserved; A/B/C over remaining body
+  const eyeCount = Math.min(48, Math.max(20, Math.floor(n * 0.01)));
+  const faceEnergyCount = Math.min(120, Math.max(36, Math.floor(n * 0.018)));
+  const throatCount = Math.min(48, Math.max(16, Math.floor(n * 0.008)));
+  const filamentCount = Math.floor(n * 0.018);
+  const reserved = eyeCount + faceEnergyCount + throatCount + filamentCount;
+  const bodyCount = n - reserved;
 
-  // Regional body weights (sum ≈ 1) — face landmarks denser than sparse scan
-  const weights: { region: RegionId; w: number; delay0: number; delay1: number }[] = [
-    { region: Region.TORSO, w: 0.15, delay0: 0.0, delay1: 0.14 },
-    { region: Region.SHOULDER, w: 0.13, delay0: 0.04, delay1: 0.18 },
-    { region: Region.NECK, w: 0.07, delay0: 0.12, delay1: 0.28 },
-    { region: Region.CRANIUM, w: 0.24, delay0: 0.18, delay1: 0.42 },
-    { region: Region.SILHOUETTE, w: 0.08, delay0: 0.22, delay1: 0.46 },
-    { region: Region.BROW, w: 0.07, delay0: 0.4, delay1: 0.58 },
-    { region: Region.ORBIT, w: 0.07, delay0: 0.44, delay1: 0.62 },
-    { region: Region.CHEEK, w: 0.07, delay0: 0.42, delay1: 0.6 },
-    { region: Region.JAW, w: 0.06, delay0: 0.46, delay1: 0.64 },
-    { region: Region.NOSE, w: 0.04, delay0: 0.55, delay1: 0.72 },
-    { region: Region.MOUTH, w: 0.02, delay0: 0.58, delay1: 0.74 },
-  ];
+  // A ~68% surface (incl. streamline bias), B ~18% internal, C ~14% topo atmosphere
+  const countA = Math.floor(bodyCount * 0.68);
+  const countB = Math.floor(bodyCount * 0.18);
+  const countC = bodyCount - countA - countB;
 
-  let cursor = 0;
-  const assignBody = (region: RegionId, countR: number, d0: number, d1: number) => {
-    for (let k = 0; k < countR && cursor < bodyCount; k++, cursor++) {
-      const i = cursor;
-      regions[i] = region;
-      delays[i] = d0 + rnd() * (d1 - d0);
-      const p = sampleHumanoidRegion(region, rnd);
-      write(humanoid, i, p.x, p.y, p.z);
-      sizes[i] = sizeFor(
-        rnd(),
-        region === Region.BROW ||
-          region === Region.NOSE ||
-          region === Region.JAW ||
-          region === Region.ORBIT ||
-          region === Region.SILHOUETTE,
-      );
-      const c = sampleCore(i, n, rnd);
-      write(core, i, c.x, c.y, c.z);
+  const landmarkChance = n <= PRESENCE_COUNTS.MOBILE ? 0.68 : 0.5;
+
+  const assignScaffold = (
+    i: number,
+    pop: Population,
+    sample: ReturnType<typeof sampleScaffoldSurface>,
+    opts?: { stream?: boolean; delayBias?: number },
+  ) => {
+    populations[i] = pop;
+    const regionId = scaffoldRegionToPresence(sample.region);
+    regions[i] =
+      pop === 2
+        ? Region.DRIFT
+        : isSilhouetteHeavy(sample.region) && pop === 0 && rnd() < 0.18
+          ? Region.SILHOUETTE
+          : regionId;
+    let d =
+      pop === 2
+        ? 0.2 + rnd() * 0.45
+        : delayForScaffold(sample.region, rnd);
+    // Shoulder streams assemble later / dissolve first — “ASSEMBLING” feel
+    if (sample.region === "shoulder" || opts?.stream) {
+      d = Math.min(0.72, d + 0.08 + rnd() * 0.12);
     }
+    delays[i] = d + (opts?.delayBias ?? 0);
+    write(humanoid, i, sample.x, sample.y, sample.z);
+    sizes[i] = sizeFor(
+      rnd(),
+      isFaceLandmark(sample.region) || sample.region === "skull",
+    );
+    // Vertical streamline bias (wireframe flow), stronger on silhouette/shoulders
+    const vertical = Math.PI * 0.5 + (rnd() - 0.5) * 0.35;
+    flow[i] = opts?.stream ? vertical + (rnd() - 0.5) * 0.15 : vertical + (rnd() - 0.5) * 0.55;
+    stretch[i] =
+      pop === 2
+        ? 0.15 + rnd() * 0.25
+        : opts?.stream || sample.region === "shoulder" || sample.region === "neck"
+          ? 0.55 + rnd() * 0.4
+          : 0.25 + rnd() * 0.45;
+    const c = sampleCore(i, n, rnd);
+    write(core, i, c.x, c.y, c.z);
+    const ctrl = curveControl(c.x, c.y, c.z, sample.x, sample.y, sample.z, rnd, regions[i] as RegionId);
+    write(curve, i, ctrl.x, ctrl.y, ctrl.z);
   };
 
-  let allocated = 0;
-  for (let wi = 0; wi < weights.length; wi++) {
-    const spec = weights[wi];
-    const isLast = wi === weights.length - 1;
-    const countR = isLast
-      ? bodyCount - allocated
-      : Math.max(1, Math.floor(bodyCount * spec.w));
-    allocated += countR;
-    assignBody(spec.region, countR, spec.delay0, spec.delay1);
+  let cursor = 0;
+
+  // Population A — dense surface + meridian streamlines
+  const streamShare = Math.floor(countA * 0.35);
+  for (let k = 0; k < streamShare && cursor < bodyCount; k++, cursor++) {
+    // Prefer shoulders/neck/skull silhouette for flowing vertical streaks
+    const sample = sampleScaffoldSurface(srnd, (r) =>
+      r === "shoulder" || r === "neck" || r === "skull" || r === "chest" || r === "clavicle",
+    );
+    // Jitter along vertical to elongate perceived stream
+    sample.y += (rnd() - 0.5) * 0.04;
+    assignScaffold(cursor, 0, sample, { stream: true });
+  }
+  for (let k = streamShare; k < countA && cursor < bodyCount; k++, cursor++) {
+    const wantFace = rnd() < landmarkChance;
+    const sample = sampleScaffoldSurface(
+      srnd,
+      wantFace ? (r) => isFaceLandmark(r) || r === "skull" : undefined,
+    );
+    assignScaffold(cursor, 0, sample);
   }
 
-  // Internal energy — sternum / neck column / cranial core (restrained)
-  const energyStart = bodyCount;
-  for (let k = 0; k < energyCount; k++) {
-    const i = energyStart + k;
+  // Population B — internal depth
+  for (let k = 0; k < countB && cursor < bodyCount; k++, cursor++) {
+    const sample = sampleScaffoldInternal(srnd);
+    assignScaffold(cursor, 1, sample);
+  }
+
+  // Population C — topographic atmosphere behind figure
+  for (let k = 0; k < countC && cursor < bodyCount; k++, cursor++) {
+    const sample = sampleScaffoldAtmosphere(srnd);
+    // Push atmosphere slightly back for depth layers
+    sample.z -= 0.15 + rnd() * 0.35;
+    assignScaffold(cursor, 2, sample);
+  }
+
+  // Face warm-core energy (idle faint; SPEAKING drives orange overlay in renderer)
+  const faceEnergyStart = bodyCount;
+  for (let k = 0; k < faceEnergyCount; k++) {
+    const i = faceEnergyStart + k;
     regions[i] = Region.ENERGY;
-    delays[i] = 0.48 + rnd() * 0.18;
+    populations[i] = 1;
+    delays[i] = 0.55 + rnd() * 0.2;
     sizes[i] = sizeFor(rnd(), true);
-    const u = rnd();
-    let x = 0;
-    let y = 0;
-    let z = 0;
-    if (u < 0.4) {
-      // sternum ember
-      x = (rnd() - 0.5) * 0.08;
-      y = 0.08 + rnd() * 0.18;
-      z = 0.06 + rnd() * 0.1;
-    } else if (u < 0.7) {
-      // neck filament
-      x = (rnd() - 0.5) * 0.05;
-      y = 0.35 + rnd() * 0.28;
-      z = (rnd() - 0.5) * 0.06;
-    } else {
-      // cranial ember
-      x = (rnd() - 0.5) * 0.1;
-      y = 0.9 + rnd() * 0.2;
-      z = (rnd() - 0.5) * 0.08;
-    }
+    flow[i] = (rnd() - 0.5) * Math.PI;
+    stretch[i] = 0.1 + rnd() * 0.2;
+    const ang = rnd() * Math.PI * 2;
+    const rad = rnd() * 0.09;
+    const x = Math.cos(ang) * rad * 0.55;
+    const y = 0.88 + Math.sin(ang) * rad * 0.45 + (rnd() - 0.5) * 0.04;
+    const z = 0.28 + rnd() * 0.06;
+    write(humanoid, i, x, y, z);
+    const c = sampleCore(i, n, rnd);
+    write(core, i, c.x * 0.4, c.y * 0.4, c.z);
+    const ctrl = curveControl(c.x * 0.4, c.y * 0.4, c.z, x, y, z, rnd, Region.ENERGY);
+    write(curve, i, ctrl.x, ctrl.y, ctrl.z);
+  }
+
+  // Throat cyan hotspot (base of neck)
+  const throatStart = faceEnergyStart + faceEnergyCount;
+  for (let k = 0; k < throatCount; k++) {
+    const i = throatStart + k;
+    regions[i] = Region.ENERGY;
+    populations[i] = 1;
+    delays[i] = 0.35 + rnd() * 0.15;
+    sizes[i] = k % 4 === 0 ? 2 : 1;
+    flow[i] = Math.PI * 0.5;
+    stretch[i] = 0.08 + rnd() * 0.12;
+    const ang = rnd() * Math.PI * 2;
+    const rad = rnd() * 0.035;
+    write(
+      humanoid,
+      i,
+      Math.cos(ang) * rad,
+      0.4 + (rnd() - 0.5) * 0.04,
+      0.1 + Math.sin(ang) * rad * 0.6,
+    );
+    const c = sampleCore(i, n, rnd);
+    write(core, i, c.x * 0.35, c.y * 0.35, c.z);
+    const hx = humanoid[i * 3];
+    const hy = humanoid[i * 3 + 1];
+    const hz = humanoid[i * 3 + 2];
+    const ctrl = curveControl(c.x * 0.35, c.y * 0.35, c.z, hx, hy, hz, rnd, Region.ENERGY);
+    write(curve, i, ctrl.x, ctrl.y, ctrl.z);
+  }
+
+  // Sparse sternum/neck filaments
+  const filamentStart = throatStart + throatCount;
+  for (let k = 0; k < filamentCount; k++) {
+    const i = filamentStart + k;
+    regions[i] = Region.ENERGY;
+    populations[i] = 1;
+    delays[i] = 0.4 + rnd() * 0.2;
+    sizes[i] = sizeFor(rnd(), true);
+    flow[i] = Math.PI * 0.5 + (rnd() - 0.5) * 0.2;
+    stretch[i] = 0.5 + rnd() * 0.35;
+    const x = (rnd() - 0.5) * 0.06;
+    const y = 0.15 + rnd() * 0.35;
+    const z = 0.04 + rnd() * 0.08;
     write(humanoid, i, x, y, z);
     const c = sampleCore(i, n, rnd);
     write(core, i, c.x, c.y, c.z);
+    const ctrl = curveControl(c.x, c.y, c.z, x, y, z, rnd, Region.ENERGY);
+    write(curve, i, ctrl.x, ctrl.y, ctrl.z);
   }
 
-  // Sparse ambient drift cloud around bust
-  const driftStart = energyStart + energyCount;
-  for (let k = 0; k < driftCount; k++) {
-    const i = driftStart + k;
-    regions[i] = Region.DRIFT;
-    delays[i] = 0.28 + rnd() * 0.5;
-    sizes[i] = 0;
-    const a = rnd() * Math.PI * 2;
-    const r = 0.55 + rnd() * 0.95;
-    const y = -0.15 + rnd() * 1.55;
-    write(humanoid, i, Math.cos(a) * r, y, Math.sin(a) * r * 0.55 - 0.05);
-    const c = sampleCore(i, n, rnd);
-    write(core, i, c.x * 1.15, c.y * 1.15, c.z);
-  }
-
-  // Eyes last — small precise dual clusters (pinpoint + tight iris, not blobs)
-  const eyeStart = driftStart + driftCount;
+  // Eyes last — restrained cyan-white dual cores (not giant discs)
+  const eyeStart = filamentStart + filamentCount;
   for (let e = 0; e < eyeCount; e++) {
     const i = eyeStart + e;
     regions[i] = Region.EYE;
+    populations[i] = 0;
     delays[i] = 0.86 + rnd() * 0.1;
-    sizes[i] = e % 6 === 0 ? 2 : 1;
+    sizes[i] = e % 8 === 0 ? 2 : 1;
+    flow[i] = 0;
+    stretch[i] = 0.05;
     const left = e < eyeCount / 2;
     const ex = left ? -0.125 : 0.125;
     const ey = 0.985;
     const ez = 0.32;
     const local = e % Math.max(1, Math.floor(eyeCount / 2));
     const ang = (local / Math.max(1, eyeCount / 2)) * Math.PI * 2;
-    // Majority on tight ring; every 4th is core pinpoint
-    const isCore = local % 4 === 0;
-    const rad = isCore ? 0.002 : 0.016 + (local % 3) * 0.004;
-    write(
-      humanoid,
-      i,
-      ex + Math.cos(ang) * rad,
-      ey + Math.sin(ang) * rad * 0.55,
-      ez + (isCore ? 0.012 : 0),
-    );
+    const isCore = local % 5 === 0;
+    const rad = isCore ? 0.003 : 0.014 + (local % 3) * 0.0035;
+    const hx = ex + Math.cos(ang) * rad;
+    const hy = ey + Math.sin(ang) * rad * 0.5;
+    const hz = ez + 0.04 + (isCore ? 0.02 : 0.008);
+    write(humanoid, i, hx, hy, hz);
     const c = sampleCore(i, n, rnd);
-    write(core, i, c.x * 0.3, c.y * 0.3, c.z);
+    write(core, i, c.x * 0.25, c.y * 0.25, c.z);
+    const ctrl = curveControl(c.x * 0.25, c.y * 0.25, c.z, hx, hy, hz, rnd, Region.EYE);
+    write(curve, i, ctrl.x, ctrl.y, ctrl.z);
   }
 
-  return { count: n, core, humanoid, sizes, delays, regions, eyeStart, eyeCount };
+  return {
+    count: n,
+    core,
+    humanoid,
+    curve,
+    sizes,
+    delays,
+    regions,
+    populations,
+    flow,
+    stretch,
+    eyeStart,
+    eyeCount,
+    faceEnergyStart,
+    faceEnergyCount,
+    throatStart,
+    throatCount,
+  };
 }
 
 function sampleCore(i: number, n: number, rnd: () => number) {
@@ -267,123 +419,6 @@ function sampleCore(i: number, n: number, rnd: () => number) {
   };
 }
 
-function sampleHumanoidRegion(region: RegionId, rnd: () => number) {
-  switch (region) {
-    case Region.CRANIUM: {
-      // Volume-filled vault (not hollow shell) + slight face-forward bias
-      const p = sampleEllipsoid(rnd, 0, 0.95, 0.04, 0.35, 0.45, 0.32, 0.55);
-      if (p.z < 0) p.z *= 0.7;
-      else p.z += 0.02;
-      return p;
-    }
-    case Region.BROW: {
-      // Soft arched brow — avoid blocky rectangles
-      const side = rnd() < 0.5 ? -1 : 1;
-      const along = rnd();
-      const x = side * (0.04 + along * 0.15);
-      const arch = Math.sin(along * Math.PI) * 0.025;
-      const y = 1.06 + arch + (rnd() - 0.5) * 0.02;
-      const z = 0.25 + rnd() * 0.07 - along * 0.02;
-      return { x, y, z };
-    }
-    case Region.ORBIT: {
-      // Lid/socket rim — dense ring, not empty dark void
-      const left = rnd() < 0.5;
-      const ex = left ? -0.125 : 0.125;
-      const a = rnd() * Math.PI * 2;
-      const r = 0.045 + rnd() * 0.028;
-      return {
-        x: ex + Math.cos(a) * r,
-        y: 0.985 + Math.sin(a) * r * 0.55,
-        z: 0.28 + rnd() * 0.05,
-      };
-    }
-    case Region.NOSE: {
-      const t = rnd();
-      return {
-        x: (rnd() - 0.5) * 0.04,
-        y: 0.88 + t * 0.12,
-        z: 0.28 + t * 0.14,
-      };
-    }
-    case Region.CHEEK: {
-      const side = rnd() < 0.5 ? -1 : 1;
-      return {
-        x: side * (0.14 + rnd() * 0.14),
-        y: 0.82 + rnd() * 0.16,
-        z: 0.12 + rnd() * 0.14,
-      };
-    }
-    case Region.JAW: {
-      const a = -0.15 + rnd() * (Math.PI + 0.3);
-      const r = 0.18 + rnd() * 0.12;
-      return {
-        x: Math.cos(a) * r,
-        y: 0.62 + Math.sin(a) * 0.08 + rnd() * 0.06,
-        z: 0.1 + rnd() * 0.12,
-      };
-    }
-    case Region.MOUTH: {
-      const x = (rnd() - 0.5) * 0.14;
-      return {
-        x,
-        y: 0.72 + (rnd() - 0.5) * 0.03,
-        z: 0.22 + rnd() * 0.06 - Math.abs(x) * 0.15,
-      };
-    }
-    case Region.NECK: {
-      const a = rnd() * Math.PI * 2;
-      const r = 0.08 + rnd() * 0.07;
-      return {
-        x: Math.cos(a) * r,
-        y: 0.38 + rnd() * 0.28,
-        z: Math.sin(a) * r * 0.65,
-      };
-    }
-    case Region.SHOULDER: {
-      const a = rnd() * Math.PI * 2;
-      const r = 0.35 + rnd() * 0.55;
-      return {
-        x: Math.cos(a) * r * 1.2,
-        y: -0.02 + rnd() * 0.28,
-        z: Math.sin(a) * r * 0.42 - 0.04,
-      };
-    }
-    case Region.TORSO: {
-      // Filled clavicle/chest volume
-      const a = rnd() * Math.PI * 2;
-      const r = 0.12 + rnd() * 0.4;
-      const shell = 0.45 + rnd() * 0.55;
-      return {
-        x: Math.cos(a) * r * 0.95 * shell,
-        y: -0.1 + rnd() * 0.34,
-        z: (Math.sin(a) * r * 0.42 - 0.02) * shell,
-      };
-    }
-    case Region.SILHOUETTE: {
-      // Contour samples — head oval + shoulder line
-      const u = rnd();
-      if (u < 0.62) {
-        const a = rnd() * Math.PI * 2;
-        return {
-          x: Math.cos(a) * 0.36,
-          y: 0.95 + Math.sin(a) * 0.46,
-          z: Math.cos(a + 1.2) * 0.28,
-        };
-      }
-      const side = rnd() < 0.5 ? -1 : 1;
-      return {
-        x: side * (0.45 + rnd() * 0.4),
-        y: 0.02 + rnd() * 0.22,
-        z: (rnd() - 0.5) * 0.2,
-      };
-    }
-    default: {
-      return sampleEllipsoid(rnd, 0, 0.9, 0, 0.34, 0.42, 0.3);
-    }
-  }
-}
-
 /** Per-particle morph factor with staggered regional assembly / reverse dissolve */
 export function particleMorphT(
   globalT: number,
@@ -394,8 +429,8 @@ export function particleMorphT(
 }
 
 /**
- * Staggered CORE↔HUMANOID interpolation. Preserves continuous ownership.
- * When globalT decreases, high-delay particles (eyes) collapse first — deliberate reverse.
+ * Curved force-field CORE↔HUMANOID interpolation (quadratic Bezier via `curve`).
+ * Preserves continuous ownership. High-delay particles collapse first on reverse.
  */
 export function morphPresence(
   from: Float32Array,
@@ -403,15 +438,28 @@ export function morphPresence(
   globalT: number,
   delays: Float32Array,
   out: Float32Array,
+  curve?: Float32Array,
 ) {
   const n = Math.min(from.length, to.length, out.length) / 3;
   const g = Math.max(0, Math.min(1, Number.isFinite(globalT) ? globalT : 0));
+  const hasCurve = curve && curve.length >= n * 3;
   for (let i = 0; i < n; i++) {
     const e = particleMorphT(g, delays[i] ?? 0);
     const o = i * 3;
-    out[o] = from[o] + (to[o] - from[o]) * e;
-    out[o + 1] = from[o + 1] + (to[o + 1] - from[o + 1]) * e;
-    out[o + 2] = from[o + 2] + (to[o + 2] - from[o + 2]) * e;
+    if (hasCurve) {
+      const inv = 1 - e;
+      // Quadratic Bezier: (1-t)²P0 + 2(1-t)t P1 + t² P2
+      out[o] =
+        inv * inv * from[o] + 2 * inv * e * curve![o] + e * e * to[o];
+      out[o + 1] =
+        inv * inv * from[o + 1] + 2 * inv * e * curve![o + 1] + e * e * to[o + 1];
+      out[o + 2] =
+        inv * inv * from[o + 2] + 2 * inv * e * curve![o + 2] + e * e * to[o + 2];
+    } else {
+      out[o] = from[o] + (to[o] - from[o]) * e;
+      out[o + 1] = from[o + 1] + (to[o + 1] - from[o + 1]) * e;
+      out[o + 2] = from[o + 2] + (to[o + 2] - from[o + 2]) * e;
+    }
   }
 }
 
@@ -421,7 +469,6 @@ export function buildCoreTargets(count: number): Float32Array {
 }
 
 export function buildHumanoidTargets(count: number): Float32Array {
-  // Same seed/layout path as buildCoreTargets for matching indices when called with same count
   return buildPresenceLayout(count).humanoid;
 }
 

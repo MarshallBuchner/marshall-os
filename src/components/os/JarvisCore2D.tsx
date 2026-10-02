@@ -103,14 +103,17 @@ export function JarvisCore2D({
       const eyeReveal = smoothstep(morph, 0.86, 0.98);
       const humanoidAmt = smoothstep(morph, 0.08, 1);
 
-      morphPresence(layout.core, layout.humanoid, morph, layout.delays, work);
+      morphPresence(layout.core, layout.humanoid, morph, layout.delays, work, layout.curve);
 
-      // Idle / speak articulation
+      // Idle / speak / blink articulation
       if (morph > 0.35 && !reducedRef.current) {
-        const breath = Math.sin(t * 1.15) * 0.012;
-        const headYaw = Math.sin(t * 0.35) * 0.014;
+        const breath = Math.sin(t * 1.1) * 0.012;
+        const headYaw = Math.sin(t * 0.32) * 0.014;
         const speaking = visualNow === "SPEAKING";
-        const jaw = speaking ? audio * 0.055 : Math.sin(t * 1.4) * 0.006;
+        const jaw = speaking ? audio * 0.05 : Math.sin(t * 1.35) * 0.005;
+        const blinkPhase = (Math.sin(t * 0.45) * 0.5 + 0.5) ** 12;
+        const lidClose = blinkPhase > 0.85 ? (blinkPhase - 0.85) / 0.15 : 0;
+        const gazeX = Math.sin(t * 0.17) * 0.005;
         for (let i = 0; i < n; i++) {
           const o = i * 3;
           const region = layout.regions[i];
@@ -126,7 +129,8 @@ export function JarvisCore2D({
             region === Region.CHEEK ||
             region === Region.JAW ||
             region === Region.MOUTH ||
-            region === Region.EYE
+            region === Region.EYE ||
+            region === Region.SILHOUETTE
           ) {
             const z2 = x * Math.sin(headYaw) + z * Math.cos(headYaw);
             x = x * Math.cos(headYaw) - z * Math.sin(headYaw);
@@ -134,16 +138,23 @@ export function JarvisCore2D({
           }
           if (region === Region.TORSO || region === Region.SHOULDER) y += breath;
           if (region === Region.JAW || region === Region.MOUTH) {
-            y -= jaw * (region === Region.MOUTH ? 1.25 : 0.75);
+            y -= jaw * (region === Region.MOUTH ? 1.2 : 0.7);
           }
           if (region === Region.ENERGY) {
-            const pulse = speaking ? 0.3 + audio * 0.45 : 0.12 + Math.sin(t * 2) * 0.04;
-            y += pulse * 0.02;
-            z += pulse * 0.015;
+            const pulse = speaking ? 0.28 + audio * 0.4 : 0.1 + Math.sin(t * 2) * 0.035;
+            y += pulse * 0.018;
+            z += pulse * 0.012;
           }
           if (region === Region.DRIFT) {
-            x += Math.sin(t * 0.4 + i * 0.17) * 0.025;
-            y += Math.cos(t * 0.33 + i * 0.13) * 0.018;
+            x += Math.sin(t * 0.38 + i * 0.17) * 0.022;
+            y += Math.cos(t * 0.31 + i * 0.13) * 0.016;
+          }
+          if (region === Region.EYE) {
+            x += gazeX;
+            y -= lidClose * 0.01;
+          }
+          if (region === Region.ORBIT && lidClose > 0.01) {
+            y -= lidClose * 0.014;
           }
           work[o] = x;
           work[o + 1] = y;
@@ -169,19 +180,47 @@ export function JarvisCore2D({
       ctx.arc(cx, cy, R * 1.25, 0, Math.PI * 2);
       ctx.fill();
 
-      // Residual Jarvis halo when humanoid
-      if (humanoidAmt > 0.4) {
-        const haloA = (presenceNow === "humanoid" ? 0.16 : humanoidAmt * 0.12) *
+      // Residual Jarvis DNA halo — denser rings + amber accents behind humanoid
+      if (humanoidAmt > 0.35) {
+        const haloA =
+          (presenceNow === "humanoid" ? 0.18 : humanoidAmt * 0.14) *
           (0.85 + Math.sin(t * 0.9) * 0.08);
-        ctx.strokeStyle = hexAlpha(accent.primary, haloA);
+        const rot = Math.sin(t * 0.08) * 0.05;
+        for (const [rx, ry, op, w] of [
+          [0.72, 0.48, 1, 1.4],
+          [0.82, 0.55, 0.7, 1.1],
+          [0.94, 0.62, 0.45, 0.9],
+        ] as const) {
+          ctx.strokeStyle = hexAlpha(accent.primary, haloA * op);
+          ctx.lineWidth = w;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy + R * 0.02, R * rx, R * ry, rot, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        // Tick marks
+        ctx.strokeStyle = hexAlpha("#a5f3fc", haloA * 0.55);
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 48; i++) {
+          const a = (i / 48) * Math.PI * 2 + rot;
+          const len = i % 6 === 0 ? 7 : 3.5;
+          const r0 = R * 0.86;
+          ctx.beginPath();
+          ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0 * 0.68 + R * 0.02);
+          ctx.lineTo(
+            cx + Math.cos(a) * (r0 + len),
+            cy + Math.sin(a) * (r0 + len) * 0.68 + R * 0.02,
+          );
+          ctx.stroke();
+        }
+        // Amber accent arcs
+        ctx.strokeStyle = hexAlpha("#fbbf24", haloA * 0.55);
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.ellipse(cx, cy + R * 0.02, R * 0.78, R * 0.52, 0, 0, Math.PI * 2);
+        ctx.ellipse(cx, cy + R * 0.02, R * 0.98, R * 0.66, rot, 0.3, 1.2);
         ctx.stroke();
-        ctx.strokeStyle = hexAlpha("#a5d8ff", haloA * 0.45);
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = hexAlpha("#f59e0b", haloA * 0.4);
         ctx.beginPath();
-        ctx.ellipse(cx, cy + R * 0.02, R * 0.9, R * 0.6, Math.sin(t * 0.08) * 0.05, 0, Math.PI * 2);
+        ctx.ellipse(cx, cy + R * 0.02, R * 0.98, R * 0.66, rot, 3.4, 4.1);
         ctx.stroke();
       }
 
@@ -201,10 +240,10 @@ export function JarvisCore2D({
         });
       }
 
-      // Fit humanoid in frame: shrink + shift down while morphing so cranium stays on-canvas
-      const baseScale = R * (0.82 - humanoidAmt * 0.14);
-      const yBias = humanoidAmt * R * 0.22;
-      const persp = 2.45;
+      // Mobile: head-and-shoulders — keep crown on-canvas, enlarge vs core diameter
+      const baseScale = R * (0.88 + humanoidAmt * 0.22);
+      const yBias = humanoidAmt * R * 0.12;
+      const persp = 2.55;
 
       // Precompute RGB once per accent
       const rgb = hexToRgb(accent.primary);
@@ -230,26 +269,46 @@ export function JarvisCore2D({
 
         const sizeClass = layout.sizes[i];
         let rad =
-          sizeClass >= 1.5 ? 2.4 : sizeClass >= 0.5 ? 1.75 : 1.35;
+          sizeClass >= 1.5 ? 2.9 : sizeClass >= 0.5 ? 2.15 : 1.7;
         rad *= depthScale * (0.95 + localT * 0.12);
-        if (region === Region.DRIFT) rad *= 0.7;
-        if (region === Region.ENERGY) rad *= 1.2 + Math.sin(t * 2.2 + i) * 0.08;
-        if (region === Region.CRANIUM || region === Region.CHEEK) rad *= 1.05;
+        if (region === Region.DRIFT) rad *= 0.65;
+        if (region === Region.ENERGY) rad *= 1.25 + Math.sin(t * 2.2 + i) * 0.08;
+        if (region === Region.CRANIUM || region === Region.CHEEK) rad *= 1.08;
+        if (region === Region.NOSE || region === Region.BROW || region === Region.MOUTH) rad *= 1.12;
 
         const front = clamp01((z + 0.45) / 0.95);
         let alpha =
-          (presenceNow === "core" ? 0.14 : 0.32 + accent.particle * 0.4) *
-          (0.5 + front * 0.55) *
+          (presenceNow === "core" ? 0.14 : 0.42 + accent.particle * 0.4) *
+          (0.55 + front * 0.55) *
           localT;
         if (region === Region.ENERGY) alpha *= 1.25;
         if (region === Region.DRIFT) alpha *= 0.45;
         if (region === Region.SILHOUETTE) alpha *= 1.1;
 
+        const speaking = visualNow === "SPEAKING";
+        // Face warm core while speaking — orange energy overlay (not giant eyes)
+        const faceWarm =
+          region === Region.ENERGY &&
+          y > 0.78 &&
+          y < 1.05 &&
+          Math.hypot(x, z - 0.28) < 0.14;
+        const throatHot =
+          region === Region.ENERGY && y > 0.35 && y < 0.48 && Math.abs(x) < 0.06;
+
         if (region === Region.EYE) {
-          if (eyeReveal < 0.04) continue;
-          alpha = eyeReveal * (0.85 + front * 0.15 + (visualNow === "SPEAKING" ? audio * 0.12 : 0));
-          rad = (0.85 + sizeClass * 0.2) * depthScale;
+          if (eyeReveal < 0.04 || speaking) continue;
+          alpha = eyeReveal * (0.7 + front * 0.15);
+          rad = (0.75 + sizeClass * 0.15) * depthScale;
           ctx.fillStyle = `rgba(${eyeRgb.r},${eyeRgb.g},${eyeRgb.b},${clamp01(alpha)})`;
+        } else if (faceWarm && speaking) {
+          const warm = 0.45 + audio * 0.45;
+          alpha = warm * (0.5 + front * 0.4);
+          rad *= 1.35;
+          ctx.fillStyle = `rgba(251,${140 + (audio * 40) | 0},60,${clamp01(alpha)})`;
+        } else if (throatHot) {
+          alpha = 0.55 + Math.sin(t * 2.8) * 0.12 + (speaking ? audio * 0.15 : 0);
+          rad *= 1.5;
+          ctx.fillStyle = `rgba(103,232,249,${clamp01(alpha)})`;
         } else if (sizeClass >= 1.5 || region === Region.ENERGY) {
           const lift = 0.15 + front * 0.25;
           ctx.fillStyle = `rgba(${Math.min(255, hiRgb.r + lift * 40)},${Math.min(255, hiRgb.g + lift * 20)},${hiRgb.b},${clamp01(alpha)})`;
@@ -257,12 +316,47 @@ export function JarvisCore2D({
           const lr = Math.min(255, rgb.r + front * 50);
           const lg = Math.min(255, rgb.g + front * 40);
           const lb = Math.min(255, rgb.b + front * 30);
-          ctx.fillStyle = `rgba(${lr | 0},${lg | 0},${lb | 0},${clamp01(alpha)})`;
+          // Grainy semi-transparent bust during assemble
+          const assembleFade = presenceNow === "transforming" ? 0.85 : 1;
+          ctx.fillStyle = `rgba(${lr | 0},${lg | 0},${lb | 0},${clamp01(alpha * assembleFade)})`;
         }
 
+        // Streamline streak for high-stretch silhouette / shoulder particles
+        const streak =
+          (region === Region.SHOULDER || region === Region.NECK || region === Region.SILHOUETTE) &&
+          layout.stretch[i] > 0.5;
+        if (streak) {
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.rotate(-0.15);
+          ctx.fillStyle = ctx.fillStyle;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, rad * 0.45, rad * 1.8, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        } else {
+          ctx.beginPath();
+          ctx.arc(sx, sy, rad, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // Thin facial reticle while resolving
+      if (humanoidAmt > 0.35 && humanoidAmt < 0.98) {
+        const rx = cx;
+        const ry = cy - 0.96 * baseScale + yBias;
+        const rr = baseScale * 0.06;
+        ctx.strokeStyle = hexAlpha("#7dd3fc", 0.25 * humanoidAmt);
+        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(sx, sy, rad, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.arc(rx, ry, rr, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(rx - rr * 0.7, ry);
+        ctx.lineTo(rx + rr * 0.7, ry);
+        ctx.moveTo(rx, ry - rr * 0.7);
+        ctx.lineTo(rx, ry + rr * 0.7);
+        ctx.stroke();
       }
 
       raf = requestAnimationFrame(draw);

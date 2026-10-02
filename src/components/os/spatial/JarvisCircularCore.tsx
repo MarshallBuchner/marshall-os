@@ -185,7 +185,7 @@ export function JarvisCircularCore({
         </mesh>
       </group>
 
-      {/* L8 violet accent */}
+      {/* L8 violet + subtle amber accent arcs (HUD DNA — original, not MCU clone) */}
       <mesh position={[0, 0, 0.06]} rotation={[0, 0, 0.9]}>
         <ringGeometry args={[1.0, 1.04, 48, 1, 0, Math.PI * 0.55]} />
         <meshBasicMaterial
@@ -196,6 +196,34 @@ export function JarvisCircularCore({
           depthWrite={false}
           onUpdate={(m) => {
             m.userData.baseOpacity = 0.22;
+          }}
+        />
+      </mesh>
+      <mesh position={[0, 0, 0.065]} rotation={[0, 0, -0.4]}>
+        <ringGeometry args={[1.66, 1.695, 64, 1, 0, Math.PI * 0.42]} />
+        <meshBasicMaterial
+          color="#fbbf24"
+          transparent
+          opacity={0.16}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          onUpdate={(m) => {
+            m.userData.baseOpacity = 0.16;
+          }}
+        />
+      </mesh>
+      <mesh position={[0, 0, 0.065]} rotation={[0, 0, 2.4]}>
+        <ringGeometry args={[1.34, 1.365, 48, 1, 0, Math.PI * 0.35]} />
+        <meshBasicMaterial
+          color="#f59e0b"
+          transparent
+          opacity={0.12}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          onUpdate={(m) => {
+            m.userData.baseOpacity = 0.12;
           }}
         />
       </mesh>
